@@ -35,7 +35,7 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Outcome:** Define what source content may be retained, for how long, and how deletion propagates across every persistence surface.
 
-**Done when:** The policy covers graph nodes, stage outputs, persisted event payloads, normalized caches, fixture bundles, canvas deletion, user-visible disclosure, and verification requirements for PG-006, PG-009, PG-015, PG-016, and PG-019.
+**Done when:** The policy covers graph nodes, stage outputs, persisted event payloads, source-ingestion reservations, both normalized cache tables, fixture bundles, canvas deletion, user-visible disclosure, and verification requirements for PG-006, PG-009, PG-015, PG-016, and PG-019.
 
 #### DQ-004 — Choose replace-versus-parallel stale-branch regeneration
 
@@ -101,12 +101,15 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Done when:**
 
-- Migrations create `canvas`, `node`, `edge`, and `graph_operation` records aligned with design sections 9 and 12.
-- Nodes and edges belong to one canvas; nodes carry independent semantic and position versions, while edges carry an entity version.
+- Migrations create `canvas`, `node`, `edge`, `graph_operation`, and `node_staleness_cause` records aligned with design sections 9 and 12.
+- Nodes and edges belong to one canvas; nodes carry independent semantic and position versions/timestamps, while edges carry an entity version.
 - Node semantic content is separated from position and UI-only state.
+- Constraint metadata validates `context_scope: global | branch` and `pinned: boolean`; branch scope requires one relational same-canvas `branch_root_node_id` of kind strategy, claim, or opportunity, while global scope requires a null root.
+- Nodes persist queryable stale state and an append-only, operation-linked cause ledger with database-enforced same-canvas references and valid active/cleared records.
 - Node and edge kinds are validated against the frozen MVP taxonomy.
-- Referential integrity prevents cross-canvas edges and dangling endpoints.
+- Referential integrity prevents cross-canvas edges, branch anchors, staleness causes, and dangling endpoints.
 - Graph operations store an actor-scoped operation key and request fingerprint with a uniqueness constraint per canvas.
+- Migrations add the required node, edge, graph-operation, active-staleness, and branch-anchor access-path indexes from design section 12.14; representative query-plan checks avoid full scans.
 
 #### PG-003 — Implement canvas and localized graph-operation APIs
 
@@ -121,9 +124,13 @@ Decision tasks are listed before their dependents. Each completed decision must 
 - Every direct mutation includes a client-generated operation key; exact retry returns the original result and conflicting key reuse returns `409`.
 - `GET /api/canvases/{canvas_id}/operations?after={revision}` returns every later operation in deterministic revision-and-operation order for incremental synchronization.
 - Semantic node mutations validate `expected_version`; `MOVE_NODE` validates `expected_position_version`; edge updates/deletes validate the edge version.
-- Semantic mutations increment only the semantic version and invalidate token metadata; `MOVE_NODE` increments only the position version, so layout changes cannot invalidate generation or graph-patch preconditions.
-- Each successful mutation appends a `graph_operation` and increments the canvas revision in the same short transaction.
-- API tests cover validation, rollback, cross-canvas isolation, incremental operation replay, and optimistic conflicts.
+- Semantic mutations increment only the semantic version, update `semantic_updated_at`, and invalidate token metadata; `MOVE_NODE` increments only the position version and updates only position/general timestamps, so layout changes cannot invalidate generation or graph-patch preconditions.
+- `UPDATE_NODE` and `PATCH_NODE_METADATA` enforce the same per-kind writable-field allowlists; attempts to smuggle or directly write server-owned review, support, stale, source-identity, provenance, or lineage fields are rejected without creating an operation.
+- `DELETE_NODE` returns `409` with incident edge IDs/versions and referencing branch-constraint IDs/versions until the client resolves those dependencies through audited operations; it never silently cascades.
+- Pinning/unpinning, changing a constraint's context scope, or reanchoring its branch root is an audited semantic mutation with an expected-version precondition and kind/same-canvas validation.
+- Each successful mutation locks the canvas before entity rows, appends a `graph_operation`, and increments the canvas revision in the same short transaction.
+- Canvas deletion removes every Phase 1 canvas-scoped record; later persistence migrations must extend the same lifecycle deletion test.
+- API tests cover validation, metadata ownership, wrong-kind fields, rollback, cross-canvas branch anchors, incremental operation replay, canvas-first locking, and optimistic conflicts.
 
 #### PG-004 — Build the editable graph canvas
 
@@ -136,6 +143,8 @@ Decision tasks are listed before their dependents. Each completed decision must 
 - A user can create/open a canvas and add goal and constraint nodes.
 - Typed nodes and edges render distinctly without supporting arbitrary ontology editing.
 - A user can select nodes, edit semantic content, add/remove edges, delete entities, and move nodes.
+- Deleting a node with incident edges or anchored branch constraints presents the conflict, guides the user through explicit dependency resolution, and retries without hiding any removal from history.
+- A user can mark a constraint as pinned global or branch-scoped, choose a valid branch root, reanchor it, and see that semantic state survive reload.
 - Node movement is persisted through idempotent localized `MOVE_NODE` operations using position-version preconditions.
 - An auto-layout action produces readable deterministic placement without changing semantic graph state.
 
@@ -149,7 +158,7 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 - Save/reload preserves graph content, metadata, positions, entity versions, and canvas revision.
 - Concurrent stale edits produce a recoverable UI conflict instead of overwriting newer state.
-- Tests cover node/edge CRUD, operation idempotency and conflicting-key reuse, semantic/position version isolation, operation ordering, revision increments, auto-layout persistence, and reload.
+- Tests cover node/edge CRUD, incident-edge and branch-anchor node-delete rejection/retry, operation idempotency and conflicting-key reuse, metadata field ownership, semantic/position version and timestamp isolation, global/branch constraint anchoring and pinning, operation ordering, revision increments, index-backed graph access, auto-layout persistence, and reload.
 - The canonical goal-plus-builder-constraints setup works end to end.
 - Phase 1 setup and verification commands are documented.
 
@@ -164,17 +173,20 @@ Decision tasks are listed before their dependents. Each completed decision must 
 **Done when:**
 
 - Migrations implement `generation_run`, `generation_stage`, `canvas_event_cursor`, `generation_event`, `graph_patch`, and `graph_patch_operation_decision` from design section 12.
+- Composite database constraints prove that every event and patch belongs to the same canvas as its run and that every patch decision can link only a graph operation from that patch's canvas; cross-canvas fixtures fail at the database boundary.
 - The durable layer defines stable `RunContextFactory`, `ExecutionProfileResolver`, and `StageOutputValidator` ports plus a generic validated stage-result envelope.
 - Deterministic test-only adapters exercise the Phase 2 system; they are unavailable to product requests and cannot silently substitute for an approved profile.
-- `POST /api/canvases/{canvas_id}/generation-runs` resolves the injected ports, validates the operation and selected-node kinds, locks and verifies expected semantic versions, captures their immutable outputs, creates the queued run in one short transaction, and immediately returns `202`, `run_id`, and `events_url`.
-- The supported operations are `generate_strategies`, `research_evidence`, `synthesize_opportunities`, and `regenerate_stale`, each with the stage plan defined in design section 14.1.
+- `POST /api/canvases/{canvas_id}/generation-runs` resolves session ownership and injected ports, locks the canvas before selected entities, validates the exact operation-specific kind/cardinality/review-state contract from design section 14.1, and captures one immutable semantic before-or-after state before creating the queued run and returning `202`, `run_id`, and `events_url`.
+- The supported operations are `generate_strategies`, `research_evidence`, `synthesize_opportunities`, and `regenerate_stale`; node scope resolves one target-localized production plan, while branch scope freezes the cycle-safe composite strategy/evidence/opportunity workset and unsupported combinations return `422`.
 - Idempotency keys are unique per canvas: an identical request returns the existing run and a conflicting reuse returns `409`.
 - `GET /api/generation-runs/{run_id}` returns status, current stage, attempts, structured terminal error, and ready patch ID when present.
-- Run context snapshots, manifests, semantic hashes, selected node versions, retry fields, request fingerprints, and immutable execution configuration are stored.
+- Run context snapshots, manifests, semantic hashes, selected node versions, branch target IDs/versions/distances/anchors, retry fields, request fingerprints, and immutable execution configuration are stored.
 - Unique constraints protect stage keys, canvas event sequences, run event sequences, and per-operation patch decisions.
+- Generation-run migrations include the queue claim/reclaim indexes required by design section 12.14; the later demo-session migration adds its active-session index when that foreign key exists.
 - The cursor migration backfills every existing canvas, and the canvas-creation path atomically creates a cursor row for every future canvas.
-- Run creation emits the shared structured-log context required for later run, stage, worker, and provider instrumentation.
-- Model tests cover allowed state transitions and terminal states.
+- The DQ-003 deletion path is extended and integration-tested across runs, stages, cursor/events, patches/decisions, and every later canvas-scoped persistence table.
+- Run creation emits the shared structured-log context and applicable run/canvas/session/operation identifiers required for later run, stage, worker, and provider instrumentation.
+- Tests cover allowed state transitions and terminal states, exact before-or-after context capture during a concurrent graph mutation, branch workset cycle/convergence deduplication, and rejection of mixed-revision snapshots.
 
 #### PG-007 — Implement queue claiming and fenced worker leases
 
@@ -185,12 +197,14 @@ Decision tasks are listed before their dependents. Each completed decision must 
 **Done when:**
 
 - The worker claims one eligible run using `SELECT ... FOR UPDATE SKIP LOCKED` in a short transaction.
-- Every claim assigns `worker_id`, a fresh lease token, and an incremented lease epoch.
+- Claim and expired-lease reclaim queries use the partial indexes from design section 12.14, with representative `EXPLAIN` assertions at production-like cardinality.
+- Every claim atomically increments `attempt` and `lease_epoch` and assigns `worker_id` plus a fresh lease token.
 - Every worker checkpoint/finalization write verifies run ID, running status, lease token, and lease epoch.
 - A lease-keeper renews heartbeats on its own database connection every 10–15 seconds.
 - The default lease is 60 seconds, heartbeat and expiry use PostgreSQL time, and renewal extends only the current token/epoch lease.
 - Queue-depth, claim-attempt, heartbeat-failure, and lease-loss telemetry is emitted with run/canvas/worker identifiers.
-- Concurrent-worker tests cover delayed-but-valid heartbeat, expiry/reclaim, late fenced renewal, and prove a stale worker cannot checkpoint or finalize after reassignment.
+- Expired or queued rows at `max_attempts` are terminalized with a poison-job error and one `run.failed` event instead of remaining claimable or stuck in `running`.
+- Concurrent-worker tests cover first-claim/reclaim attempt increments, exhausted-crash terminalization, delayed-but-valid heartbeat, expiry/reclaim, late fenced renewal, and prove a stale worker cannot checkpoint or finalize after reassignment.
 
 #### PG-008 — Implement stage checkpoints, retry, and resume
 
@@ -234,12 +248,13 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Done when:**
 
-- `POST /api/generation-runs/{run_id}/cancel` records a request checked before each stage, after external calls, and before finalization.
+- `POST /api/generation-runs/{run_id}/cancel` locks the run: queued runs become cancelled immediately, running runs receive a cancellation request finalized only by the fenced worker, duplicate cancelled requests return the existing result, and completed/non-cancellable states return `409`.
 - `POST /api/generation-runs/{run_id}/retry` requeues only a failed run with a retryable error, no active lease, and remaining attempts; it preserves immutable inputs/checkpoints, emits `run.retry_requested`, and returns `409` for cancelled, non-retryable, lease-owned, or exhausted runs.
 - Runs fail terminally after the configured maximum attempts with a structured error and `run.failed` event.
 - Failures preserve completed checkpoints and never leave permanent loading state.
 - Workers exit gracefully after 50 jobs or 14,400 seconds and release connections, lease threads, queries, caches, and large payloads between jobs.
-- Tests cover cancellation, explicit safe retry, exhausted retry rejection, poison jobs, lease loss, worker crash recovery, and clean recycling.
+- Attempt, cancellation, exhausted-job, retry, and recycling telemetry is emitted by this component.
+- Tests cover concurrent cancel-versus-claim/finalize, at-most-one `run.cancelled` event, explicit safe retry, exhausted retry rejection, poison jobs, lease loss, worker crash recovery, and clean recycling.
 
 #### PG-011 — Verify the durable-job architecture end to end
 
@@ -268,9 +283,10 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 - The initial 14 opportunity strategies and their required signals/failure conditions are versioned data.
 - Strict schemas distinguish operation plan, research questions, query plan, required evidence types, source, observed/derived/inferred/contradicting claim, evidence cluster, opportunity, assumption, risk, validation experiment, and graph patch, and supply production `StageOutputValidator` implementations for those outputs.
-- Claim schemas require normalized, sorted `topic_keys` and `mechanism_tags` plus a stable `independence_key`; invalid or noncanonical values are rejected.
-- Opportunity output requires buyer, problem, spend/workaround, mechanism, business model, why now, evidence, contradiction, assumptions, risks, experiment, and builder fit.
-- Quality dimensions remain separate and the supported/speculative threshold is enforced.
+- Claim schemas require normalized, sorted `topic_keys` and `mechanism_tags` plus a nullable normalized `contradiction_target_key`; source schemas require a stable `independence_key`. Invalid or noncanonical values and claim/source relation mismatches are rejected.
+- Opportunity output requires buyer, problem, spend/workaround, mechanism, business model, why now, evidence, contradiction, assumptions, risks, experiment, builder fit, distribution channel/rationale, defensibility rationale, technical feasibility, and operational burden.
+- Evidence strength, novelty, builder fit, technical feasibility, distribution clarity, and operational burden remain separately validated dimensions rather than one score; a channel-less distribution score or rationale-free defensibility value is invalid.
+- The supported/speculative threshold is enforced against the structured fields and accepted evidence rather than dimension ratings alone.
 - Invalid or incomplete structured model output fails explicitly.
 
 #### PG-013 — Build deterministic operation-specific context selection
@@ -281,14 +297,16 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Done when:**
 
-- Context includes mandatory selected nodes, global pinned constraints, operation, user instruction, IDs, and versions.
+- Context includes mandatory selected nodes, pinned global constraints, and pinned branch constraints only when at least one mandatory generated selection exists and their relational anchor contains every such selection, plus operation, user instruction, IDs, and versions.
 - A production `RunContextFactory` implements the durable Phase 2 port without changing its stored run envelope.
 - Provenance, evidence, descendants, and optional neighbors follow the frozen tier budgets and deterministic ranking rules.
 - Traversal follows the design's per-edge dependency direction table, uses a visited set, and is cycle-safe.
 - A bounded contradiction reserve is applied before supporting evidence is packed.
+- The model response budget and fixed system/JSON/edge/excerpt reserve are removed before tier percentages are applied; fully serialized requests never exceed the hard model input limit, and mandatory overflow returns `422 context_too_large` before queueing.
 - Canonical semantic token counts are precomputed and invalidated when semantic content changes.
+- Context recency uses `semantic_updated_at`; position timestamps/versions never participate in semantic ranking, token representation, manifests, or hashes.
 - Every run persists included and excluded entity IDs in a context manifest.
-- Unit tests prove deterministic packing, stable tie-breaking, correct forward/inverse edge traversal, and termination on cycles.
+- Unit tests prove deterministic packing, stable tie-breaking, branch-anchor inclusion/exclusion, identical context after layout-only moves, correct forward/inverse edge traversal, termination on cycles, hard-cap enforcement, mandatory overflow, and exclusion of coordinates, styling, UI state, full pages when claims exist, and unrelated branches.
 
 #### PG-014 — Implement provider ports and execution profiles
 
@@ -316,15 +334,19 @@ Decision tasks are listed before their dependents. Each completed decision must 
 **Done when:**
 
 - Research respects the default budget of five queries and ten retained sources.
-- Adapter telemetry records provider/source identity, latency, rate-limit outcomes, retained counts, and OpenAI token usage where available.
-- Source results retain URL, title, retrieval time, content hash, source kind, and authority metadata.
+- Adapter telemetry records provider/source identity, latency, rate-limit outcomes, retained counts, OpenAI token usage where available, and source-ingestion reservation, in-flight reuse, completion/failure, expiry/reclaim, and fence-loss outcomes with ingestion/run/canvas identifiers.
+- Source results retain URL, title, retrieval time, content hash, source kind, authority metadata, and canonical source-level `independence_key`.
 - GitHub and Stack Exchange rate limits produce structured retryable failures.
-- User-supplied URLs allow HTTPS only, reject private/loopback/link-local/metadata destinations, re-check redirects, and enforce time/size limits.
-- `POST /api/canvases/{canvas_id}/sources` accepts either a protected HTTPS URL or bounded user-supplied text, validates it as untrusted data, and creates an audited user-authored source node for the canvas.
+- User-supplied URLs allow HTTPS only, reject private/loopback/link-local/metadata destinations, re-check at most five redirects, enforce three-second connect/fifteen-second total timeouts, accept at most 2 MiB of decompressed HTML/plain text, and reject other content types; user text is at most 100 KiB UTF-8.
+- Migrations create the canvas-scoped `source_ingestion_request` reservation with operation key, request fingerprint, fenced lease, validated `running | completed | failed` lifecycle, result, and error fields from design section 12.12.
+- The reservation migration includes the partial reclaim index from design section 12.14 and a representative query-plan assertion.
+- `POST /api/canvases/{canvas_id}/sources` requires a canvas-scoped operation key, accepts either a protected HTTPS URL or bounded user-supplied text, and reserves the key before external work; exact completed retries return the original source, conflicts return `409`, and identical in-flight retries return `202` with the ingestion ID.
+- `GET /api/source-ingestions/{ingestion_id}` returns permitted status/error/result data for the same canvas/session, and stale reservations can be reclaimed only after their bounded lease expires.
 - Any URL retrieval occurs outside a database transaction; only the validated normalized result is persisted in a short transaction with its graph operation.
 - `GET /api/sources/{source_id}` returns source metadata and permitted retained content without exposing credentials or unsanitized excerpts.
 - Retrieved pages and user-supplied text remain isolated from system instructions, cannot trigger command execution, and pass adversarial prompt-injection tests.
 - Source retention policy decision **DQ-003** is resolved and implemented.
+- Tests cover single-flight concurrency, crash/reclaim fencing, exact retry, conflicting-key reuse, redirect/DNS rebinding attempts, decompression bombs, content types, and every hard input bound.
 
 #### PG-016 — Implement claim extraction, evidence clustering, and source caching
 
@@ -336,17 +358,18 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 - One source can back multiple claims and one claim can reference multiple independent sources.
 - Claims record classification, evidence type, strength, limitations, and source IDs.
-- Claims record canonical `topic_keys`, `mechanism_tags`, and `independence_key` values used by deterministic retention and clustering.
+- Claims record canonical `topic_keys`, `mechanism_tags`, `contradiction_target_key`, and source IDs; sources record canonical `independence_key` values used by deterministic retention and support counting.
 - Duplicate, irrelevant, unsupported, and contradicting evidence are handled explicitly.
 - At most twelve claims are retained using the source hierarchy, source authority, independent-source count, strength, recency, and stable-ID tie-breaking.
-- A deterministic `clustering` checkpoint groups claims by the exact tuple of evidence type, sorted topic keys, sorted mechanism tags, and contradiction target without losing source provenance or independence boundaries.
-- The PostgreSQL cache reads and writes exact keys covering normalized query, source URL/content hash, strategy version, prompt version, and context hash; repeat-hit and changed-key tests prove reuse and invalidation behavior.
+- A deterministic `clustering` checkpoint groups claims by the exact tuple of evidence type, sorted topic keys, sorted mechanism tags, and normalized contradiction target without losing source provenance; independent support counts distinct accepted source `independence_key` values.
+- Migrations create separate canvas-scoped `research_query_cache` and `source_content_cache` tables, their exact-key/freshness indexes, and DQ-003 deletion/redaction behavior from design section 12.11.
+- Query-cache lookup uses only known pre-request fields; source-content lookup uses normalized URL plus freshness before retrieval and persists content hash as immutable identity afterward. Repeat-hit, expiry, changed-hash, changed-key, and deletion tests prove reuse and invalidation behavior.
 - Cached results retain original retrieval metadata and a cache-hit marker so they cannot be presented as newly retrieved.
 - Telemetry records extraction/retention counts, cluster counts, independent-source counts, cache hits/misses, and invalidation reasons.
 - Each schema-valid extraction batch emits progressive provisional evidence; no source or claim becomes authoritative or selectable until its research patch is accepted.
 - Rendered excerpts are sanitized before they reach the browser.
 - Rejected sources and claims follow design section 8.2.1 and are excluded from context, quality thresholds, synthesis, and critique.
-- Tests prove clustering is stable under input reordering and that syndicated copies sharing an `independence_key` do not count as independent support.
+- Tests prove clustering is stable under input reordering, contradiction targets split clusters correctly, multiple independent source keys count separately, and syndicated copies sharing a source `independence_key` count only once.
 
 #### PG-017 — Implement opportunity synthesis and critique
 
@@ -357,8 +380,9 @@ Decision tasks are listed before their dependents. Each completed decision must 
 **Done when:**
 
 - Synthesis generates exactly three structured candidates from the selected strategy, constraints, and retained evidence.
+- Every candidate carries explicit distribution channel/rationale, defensibility rationale, technical feasibility, and operational burden fields.
 - Critique evaluates novelty, feasibility, buyer/budget, recurrence, distribution, operational burden, differentiation, builder fit, and falsifying evidence.
-- Each candidate exposes separate quality dimensions rather than one synthetic score.
+- Each candidate exposes evidence strength, novelty, builder fit, technical feasibility, distribution clarity, and operational burden separately rather than one synthetic score.
 - `supported` is assigned only when every design section 7.3 threshold is met; otherwise the candidate is `speculative`.
 - Every candidate includes material contradicting evidence or an explicit evidence gap.
 - Synthesis and critique enforce the intellectual-property boundaries in design section 21.3 and reject recommendations to copy protected code/assets, impersonate trademarks, reuse private datasets, or violate third-party terms.
@@ -376,6 +400,8 @@ Decision tasks are listed before their dependents. Each completed decision must 
 - Semantic update/delete operations include `expected_version`; `MOVE_NODE` includes `expected_position_version`; edge updates/deletes include the edge `expected_version`.
 - Every newly proposed entity has a patch-local `client_generated_id`; IDs are unique within the patch and references may use only known server IDs or those local IDs.
 - The patch records an operation dependency graph, and schema validation rejects cycles, unresolved references, and subsets whose required prerequisites are absent.
+- A candidate `DELETE_NODE` includes accepted prerequisite operations for every incident edge and branch-root constraint reference known at construction time; otherwise validation rejects the patch.
+- Regeneration patches declare their frozen target production units and the exact stale node IDs they may resolve; schema validation rejects targets outside the originating run workset.
 - New nodes and edges preserve traceable provenance from sources and claims through opportunities, risks, assumptions, and experiments.
 - Pipeline completion stores a candidate `GraphPatch`; it never mutates authoritative graph state.
 - Patch schema validation rejects missing endpoints, invalid kinds, and malformed metadata.
@@ -394,7 +420,7 @@ Decision tasks are listed before their dependents. Each completed decision must 
 - Matching includes scenario, stage, pipeline version, provider identity, semantic input hash, and fixture version.
 - A mismatch fails with a recoverable fixture-input error and never silently falls back to live APIs.
 - Fixture providers emit the same persisted domain events as live providers.
-- Manifest cases cover planning, research, extraction, synthesis, critique, and patch construction for every operation plan; full replay reaches `patch.ready` without any live provider call.
+- Manifest cases cover planning, research, extraction, synthesis, critique, and patch construction for every node plan and composite branch-phase combination; full replay reaches one `patch.ready` without any live provider call.
 - Fixture content and deletion behavior implement the retained-content policy selected in **DQ-003**.
 
 #### PG-020 — Integrate and verify the intelligence pipeline
@@ -407,7 +433,8 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 - A user can generate three materially different strategies from a goal and builder constraints.
 - A `research_evidence` run produces the selected strategy, research questions, query plan, required evidence types, progressively inspectable provisional evidence, deterministic clusters, and a reviewable evidence patch.
-- The user must accept the evidence patch and explicitly select applied, non-rejected evidence nodes before starting `synthesize_opportunities`; selected IDs and expected versions are captured by the new run.
+- The user must accept the evidence patch and explicitly select applied, non-stale, non-rejected claim nodes before starting `synthesize_opportunities`; selected claim IDs/expected versions are captured and their accepted source provenance is included automatically.
+- Operation tests cover every allowed and rejected node-kind/cardinality/review-state combination, global and anchored branch constraints, claim-only synthesis selection with automatic source provenance, every target-localized stale-node plan, and composite branch worksets containing strategy, evidence, and opportunity-family targets.
 - The synthesis run produces exactly three structured opportunities and never consumes provisional, rejected, unselected, or stale evidence.
 - Every opportunity traces to supporting and contradicting claims.
 - Live, hybrid-demo, and replay profiles use the same orchestrator and event contract.
@@ -425,10 +452,15 @@ Decision tasks are listed before their dependents. Each completed decision must 
 **Done when:**
 
 - Patch previews distinguish additions, updates, deletes, provenance, assumptions, risks, and contradictions.
+- Opportunity review renders evidence strength, novelty, builder fit, technical feasibility, distribution clarity, and operational burden separately, with the distribution and defensibility rationale visible and no aggregate quality score substituted.
 - `GET /api/graph-patches/{patch_id}` returns the immutable candidate operations and any existing per-operation decisions.
 - A user can accept all, accept selected operations, apply nonconflicting operations only, reject all, or request regeneration.
 - Dependencies between selected operations are shown in review; selection includes all required prerequisites or is blocked with an actionable dependency error.
 - `POST /api/graph-patches/{patch_id}/reject` records every candidate operation as rejected without mutating graph state and is idempotent on retry.
+- `POST /api/graph-patches/{patch_id}/regenerate` accepts revision feedback and an idempotency key; in one short transaction it first revalidates the original selected entities/current profile, then rejects every undecided operation with reason `regeneration_requested`, snapshots current semantic state, creates one linked queued run, and performs no provider work.
+- Invalid current inputs/profile return `409` without changing the pending patch.
+- Exact regeneration retry returns the linked run, while conflicting key reuse or a non-pending patch returns `409`; `GET` exposes the durable `regenerated_by_run_id` lineage.
+- Patch-regeneration telemetry records request, idempotent replay, validation/profile conflict, original-patch rejection, linked run, and terminal outcome with patch/run/canvas identifiers.
 - Rejected patches and per-operation decisions remain auditable without appearing as accepted graph state.
 
 #### PG-022 — Apply accepted patch operations transactionally
@@ -442,6 +474,7 @@ Decision tasks are listed before their dependents. Each completed decision must 
 - Apply locks the patch, canvas, and touched entities in deterministic ID order under PostgreSQL `READ COMMITTED`.
 - `POST /api/graph-patches/{patch_id}/apply` accepts the requested operation subset and optional nonconflicting-only mode.
 - Expected versions, endpoint existence, dependency closure, and patch-local identity references are validated before writes.
+- `DELETE_NODE` applies only after accepted prerequisite operations removed every incident edge and deleted, rescoped, or reanchored every branch constraint reference; a concurrently added dependency returns a conflict and prevents the node deletion.
 - The server allocates deterministic-on-retry UUID mappings for accepted `client_generated_id` values, persists the `client_id_map`, resolves dependent references in topological order, and returns the map.
 - Each applied operation uses a deterministic patch-derived operation key so an exact retry returns the original outcome and a conflicting reuse is rejected.
 - `base_canvas_revision` remains audit context rather than a global apply precondition; only touched-entity versions and dependency validation cause conflicts, and a conflicted prerequisite skips its dependents.
@@ -458,15 +491,21 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Done when:**
 
-- Editing/removing an upstream premise propagates stale state transitively using the design's explicit per-edge dependency direction table.
-- Rejecting previously accepted evidence propagates staleness to every accepted descendant that depended on it while leaving independently supported claims eligible.
-- Propagation is a cycle-safe breadth-first traversal with a visited set; converging paths do not duplicate work and the origin is not re-marked through a cycle.
+- Editing/removing an upstream premise propagates stale state transitively using the design's explicit per-edge dependency direction table and writes operation-linked causes in the relational ledger.
+- The first fresh-to-stale transition increments semantic version once and invalidates token metadata; additional active causes do not increment again, and system stale transitions never recursively seed a second propagation.
+- Rejecting previously accepted evidence is one canvas-first transaction that records review status and operation, recalculates support eligibility, rejects solely supported claims, updates multiply supported claims, propagates staleness, writes causes, and rolls back as a unit on failure.
+- Propagation is a cycle-safe breadth-first traversal with a visited set; converging paths do not duplicate targets or version bumps and the origin is not re-marked through a cycle.
 - Staleness never triggers automatic recursive generation.
-- A user can regenerate one selected stale node or branch with a fresh context snapshot.
-- Regenerated output is delivered as another candidate patch.
-- Backend operations support audited rejection of previously accepted evidence with semantic-version preconditions, assumption replacement, retained branch lineage, and branch comparison according to **DQ-004**.
+- Node scope normalizes the selected stale root to one strategy, claim/provenance, or opportunity-family production unit and executes only its target-localized plan.
+- Branch scope executes the frozen, deduplicated workset as checkpointed strategy, evidence, and opportunity batches in design order, feeds provisional earlier-batch results into later batches, and performs one final patch-construction stage.
+- Regeneration output cardinality is exactly one candidate per frozen target production unit; the default three-strategy/three-opportunity cardinality is not reused for stale regeneration.
+- Composite checkpoint keys include phase, stable target set, and input hash; retry resumes completed batches, while failure/cancellation exposes no partial graph mutation.
+- Regenerated output is one candidate patch declaring every target production unit and permitted stale resolution; unrelated branches are absent.
+- Applying a replacement patch clears causes only for declared reused targets with one combined semantic-version increment, removes causes with declared deleted targets, and creates replacement nodes fresh; parallel mode leaves old causes active and creates fresh successors according to **DQ-004**. Manual edits never clear staleness implicitly.
+- Backend operations support audited assumption replacement, retained branch lineage, and branch comparison according to **DQ-004**; unsupported/user-authored/source/placeholder/non-stale regeneration roots return `422` rather than guessing.
 - Regeneration context selection implements the explicit-neighborhood or semantic-similarity policy selected in **DQ-005**.
-- Tests cover every edge kind and direction, pre-delete and changed-edge relationships, cycles, converging paths, independent support, evidence rejection, assumption replacement, and parallel/replacement branch lineage.
+- Stale-regeneration telemetry records scope, workset and batch sizes, checkpoint reuse, cancellation/failure, patch ID, accepted resolution count, and lineage mode with run/canvas identifiers.
+- Tests cover every edge kind and direction, pre-delete and changed-edge relationships, cycles, converging paths, multiple causes, exact version transitions, rollback-safe evidence rejection, independent support, node-local regeneration, composite checkpoint/resume/cancel, assumption replacement, and parallel/replacement clearing and lineage.
 
 #### PG-024 — Implement generation placeholders and resilient progress UX
 
@@ -493,9 +532,10 @@ Decision tasks are listed before their dependents. Each completed decision must 
 **Done when:**
 
 - End-to-end tests cover critique-to-preview-to-transactional-apply.
+- Opportunity preview and applied-node inspection show every required quality dimension separately plus distribution and defensibility rationale.
 - Editing or deleting an input visibly marks every dependent descendant stale.
 - A user can compare parallel branches and replace an assumption through audited graph operations.
-- Explicit branch regeneration leaves unrelated graph branches unchanged.
+- Explicit composite branch regeneration produces one patch, resumes from completed batch checkpoints after failure, leaves unrelated branches unchanged, and clears stale causes only for accepted replacement targets.
 - Evidence rejection remains auditable, excludes rejected evidence from later context, marks dependent descendants stale, and preserves independently supported claims.
 - Patch conflict recovery, per-operation decision audit, partial acceptance, cancellation, and reload preserve authoritative state.
 - The canonical journey satisfies MVP acceptance criteria 1–14 locally.
@@ -513,8 +553,18 @@ Decision tasks are listed before their dependents. Each completed decision must 
 - Demo opportunity decision **DQ-008** is resolved and represented by a seeded canonical canvas and immutable fixture bundle.
 - `demo_hybrid_v1` is the primary judge-facing profile and `replay_v1` is an explicit emergency fallback.
 - A one-click reset restores the known starting state.
+- Migrations create PostgreSQL-backed `demo_session` and global quota-window state, enforce unique active-canvas ownership, link demo runs to their session independently of reset, and add active-run/session-expiry indexes from design section 12.14; the browser receives a signed HttpOnly SameSite cookie and mutating requests retain Django CSRF protection.
+- Every anonymous visitor receives an isolated clone of the seeded canvas, and reset replaces only that session's active clone under concurrent requests.
+- Sessions expire 24 hours after creation; reset neither extends expiry nor resets quota, cookie expiry matches server expiry, bootstrap GET creates a new isolated session after expiry, and expired API requests return `demo_session_expired` without performing work.
+- A bounded `SKIP LOCKED` cleanup path cancels nonterminal work, respects lease fencing, deletes expired canvas data through DQ-003, and removes the session only after its runs are terminal or fenced.
+- Every canvas, graph-operation, run status/cancel/retry, SSE, patch get/apply/reject/regenerate, source, and ingestion endpoint resolves the signed session and returns non-enumerating `404` for cross-session or retired-canvas resources.
+- Anonymous requests may select only `demo_hybrid_v1` or `replay_v1`; `live_v1` and unregistered profiles are rejected server-side.
+- Hybrid usage is limited to twelve runs per session per one-hour window, at most two concurrent runs, and 120 global runs per one-hour window; counters update atomically before queueing.
+- Quota exhaustion returns `429` and may offer an explicit replay switch without silently changing the stored execution profile.
 - Cached evidence is labeled as previously retrieved and visually distinguished from live GPT-5.6 reasoning.
-- The flow requires no account or uses trivial judge credentials with server-managed secrets.
+- The flow requires no account; all provider credentials remain server-managed.
+- This component emits demo-session creation/expiry/cleanup, reset, profile rejection, per-session/global quota rejection, circuit-breaker, and replay-switch telemetry with session/run/canvas/profile identifiers.
+- Tests cover session forgery, cross-session read and mutation denial for every resource family, expired-cookie bootstrap versus API behavior, concurrent cleanup/lease fencing, CSRF, concurrent quota races, profile allowlisting, global circuit breaking, unique canvas ownership, and reset without expiry or quota evasion.
 
 #### PG-027 — Build the comparative evaluation harness
 
@@ -524,15 +574,15 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Done when:**
 
-- The harness contains 15–25 builder scenarios and compares generic, strategy-only, strategy-plus-evidence, and full-pipeline variants.
-- Blind scoring covers specificity, evidence relevance, novelty, feasibility, economic leverage, testability, and builder fit.
+- The harness contains at least twenty builder scenarios and compares generic, strategy-only, strategy-plus-evidence, and full-pipeline variants.
+- Variant labels/order are randomized; two independent blinded raters use a fixed five-point rubric for specificity, evidence relevance, novelty, feasibility, economic leverage, testability, and builder fit, with two-point disagreements adjudicated and retained.
 - Results report each dimension separately with reproducible model/prompt/strategy versions.
-- The full pipeline materially outperforms the generic baseline on evidence relevance, specificity, testability, and builder fit.
+- For evidence relevance, specificity, testability, and builder fit, paired scenario-level results show at least `+0.5` mean points over the generic baseline and a 95% bootstrap confidence-interval lower bound above zero.
 - Evaluation placement decision **DQ-006** determines whether the harness remains internal or ships in the UI.
 
 #### PG-028 — Aggregate production observability and verify security hardening
 
-**Depends on:** PG-025
+**Depends on:** PG-025, PG-026
 
 **Outcome:** Prove the component-owned instrumentation is complete and usable, and verify that trust boundaries already enforced by ingestion, extraction, synthesis, and rendering remain effective in the public demo.
 
@@ -540,9 +590,10 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 - Structured logs emitted by their owning run, worker, provider, cache, and patch components include all identifiers, lease data, versions, durations, token usage, counts, and errors listed in design section 25.1.
 - Existing component metrics are aggregated into queue, stage, failure/retry, lease, provider, patch, and evidence-quality views; this task does not defer first-time instrumentation from earlier phases.
+- Aggregation includes attempt/cancellation terminalization, source-ingestion reclaim, stale and pending-patch regeneration, demo session creation/expiry/cleanup, reset/profile rejection, quota rejection, circuit-breaker, and replay-switch telemetry emitted by their owning tasks.
 - An end-to-end diagnostic drill traces one successful run, one retryable provider failure, one lease loss, and one patch conflict through correlated logs, metrics, events, and audit records.
 - Audit records preserve prompts/strategies/models, context, sources, claims, candidates, critiques, accepted/rejected operations, and user edits.
-- End-to-end security tests verify sanitized rendering, server-side secrets, URL/redirect defenses, user-text isolation, prompt-injection resistance, and intellectual-property output restrictions.
+- End-to-end security tests verify endpoint-wide anonymous resource authorization, sanitized rendering, server-side secrets, URL/redirect defenses, user-text isolation, prompt-injection resistance, and intellectual-property output restrictions.
 - No third-party or user-supplied content can alter system instructions or trigger command execution.
 
 #### PG-029 — Deploy the public web, worker, and PostgreSQL runtime
@@ -557,6 +608,7 @@ Decision tasks are listed before their dependents. Each completed decision must 
 - Web and worker processes use restart policies and bounded database connection settings.
 - Environment-based OpenAI and provider credentials are server-managed.
 - The seeded demo, reset, hybrid profile, and replay fallback work in the deployed environment.
+- Secure session cookies, CSRF, per-session/global PostgreSQL quotas, concurrent-run limits, and the anonymous profile allowlist remain effective across multiple web/worker processes.
 - A production smoke test completes the canonical workflow and verifies incremental SSE delivery.
 
 #### PG-030 — Complete README, setup, testing, and hackathon compliance
@@ -568,8 +620,8 @@ Decision tasks are listed before their dependents. Each completed decision must 
 **Done when:**
 
 - Product-name decision **DQ-007** is applied consistently to the repository, UI, and submission copy.
-- README explains the product, architecture, setup, ASGI/SSE verification, tests, execution profiles, judge path, and known limitations.
-- README explains how Codex and GPT-5.6 contributed and records the required `/feedback` Codex Session ID.
+- README explains the product, architecture, setup, ASGI/SSE verification, tests, execution profiles, source-ingestion limits, public-demo quotas/profile restrictions, replay fallback, judge path, and known limitations.
+- README explains how Codex and GPT-5.6 contributed and records the Session ID returned by running `/feedback` near the end in the Codex Project task where the majority of core functionality was built; an unrelated planning/review task ID does not satisfy this criterion.
 - Repository URL, Work & Productivity positioning, public testing path, and under-three-minute YouTube requirements are covered.
 - Instructions are verified from a clean environment.
 
@@ -585,7 +637,7 @@ Decision tasks are listed before their dependents. Each completed decision must 
 - A first-time user completes all 16 MVP acceptance criteria on the public instance.
 - The video script explains the problem, graph-native differentiation, evidence/provenance, Codex usage, GPT-5.6 usage, and judge test path in under three minutes.
 - Replay fallback and failure-recovery procedures are rehearsed.
-- Final submission artifacts and links are checked against the official rules.
+- Final submission artifacts and links, including the primary implementation Project task's `/feedback` Session ID, are checked against the official rules.
 
 ## In Progress
 
@@ -602,6 +654,6 @@ None.
 ## Notes
 
 - Follow the phase order unless `design.md` or an explicit user instruction changes it.
-- Preserve the frozen architecture: Django, PostgreSQL-only state, separate worker, PostgreSQL queue, canvas-sequenced SSE, fenced leases, short transactions, idempotent direct graph operations, independent semantic/position versions, operation-specific runs with explicit safe retry, explicit evidence selection, candidate graph patches with dependency-closed local-ID mapping and per-operation decisions, deterministic context packing and evidence clustering, direction-aware cycle-safe cascade invalidation, full-stage replay fixtures, resumable checkpoints, bounded workers, and typed execution profiles.
+- Preserve the frozen architecture: Django, PostgreSQL-only state, separate worker, PostgreSQL queue, canvas-sequenced SSE, fenced leases, short transactions, idempotent direct graph/source-ingestion operations, explicit incident-edge deletion, independent semantic/position versions and recency, exact operation input contracts, operation-specific runs with explicit safe retry, source-level evidence independence, split query/content caches, explicit evidence selection, candidate graph patches with dependency-closed local-ID mapping, regeneration lineage, and per-operation decisions, deterministic context packing and evidence clustering, direction-aware cycle-safe cascade invalidation, full-stage replay fixtures, resumable checkpoints, bounded workers, typed execution profiles, and isolated quota-protected public demo sessions.
 - Do not add MVP non-goals such as multi-user collaboration, mobile-first editing, arbitrary ontologies, billing, Redis, Celery, Neo4j, or WebSockets.
 - Open questions are decision checkpoints, not permission to diverge from frozen architectural decisions.
