@@ -6,7 +6,7 @@
 **Target:** OpenAI Build Week hackathon MVP  
 **Primary track:** Work & Productivity  
 **Primary user:** Technical founder or product builder  
-**Last updated:** July 13, 2026
+**Last updated:** July 14, 2026
 **Author:** Daniel Pittaluga
 
 ---
@@ -196,7 +196,11 @@ The system researches:
 - Existing workaround tools
 - Customer complaints
 
+Validated extraction batches appear progressively as provisional source and claim nodes. When research completes, the user reviews and applies the evidence patch, rejects any unsuitable evidence, and selects the accepted evidence nodes to use for synthesis.
+
 ### 5.4 Opportunity synthesis
+
+The user starts a separate synthesis run from the selected accepted evidence.
 
 The system generates:
 
@@ -342,6 +346,20 @@ Source: User discussion
 - `inferred`: model interpretation
 - `contradicting`: evidence against the opportunity
 
+### 8.2.1 Evidence rejection semantics
+
+Evidence rejection is an authoritative user action, not a visual-only preference.
+
+When a source or claim is rejected:
+
+- The node remains in the graph operation history for auditability.
+- Its semantic metadata records `review_status: rejected` and the rejecting operation.
+- It is excluded from future context packing, support-threshold calculations, synthesis, and critique.
+- Accepted descendants that depended on it are marked stale through the normal transitive invalidation rules.
+- Rejecting a source rejects claims supported only by that source; claims with other accepted independent sources remain eligible but lose the rejected source from their support calculation.
+
+Whether rejected evidence remains visible as a muted node is a presentation decision and does not change these semantics.
+
 ### 8.3 Source hierarchy
 
 1. Official pricing, filings, documentation
@@ -384,6 +402,9 @@ Avoid in MVP:
   "claim": "Small teams find the product operationally complex.",
   "classification": "observed",
   "evidence_type": "customer_pain",
+  "topic_keys": ["vendor_security_review"],
+  "mechanism_tags": ["automate_mandatory_work"],
+  "independence_key": "publisher:example.com",
   "strength": "medium",
   "limitations": [
     "Single discussion thread",
@@ -392,6 +413,8 @@ Avoid in MVP:
   "source_ids": ["source_1", "source_9"]
 }
 ```
+
+Extraction emits sorted, deduplicated `topic_keys` and `mechanism_tags` as normalized lowercase slugs. `mechanism_tags` use the versioned opportunity-strategy vocabulary where applicable. `independence_key` identifies the canonical publisher or originating dataset so syndicated or mirrored observations do not count as independent support.
 
 ### 8.6 Source schema
 
@@ -439,6 +462,22 @@ The MVP supports:
 - `requires_validation`
 - `extracted_from`
 
+### 9.2.1 Dependency direction and invalidation
+
+Dependency traversal uses semantic direction, which is not always the stored edge direction:
+
+| Edge kind | Stored source → target meaning | Invalidation direction |
+|---|---|---|
+| `supports` | Evidence supports a claim or opportunity | source → target |
+| `contradicts` | Evidence contradicts a claim or opportunity | source → target |
+| `derived_from` | Upstream premise evolves into a derived node | source → target |
+| `evolves_into` | Earlier node evolves into a later node | source → target |
+| `requires_validation` | Premise requires a validation experiment | source → target |
+| `constrained_by` | Candidate is constrained by a constraint node | target → source |
+| `extracted_from` | Claim is extracted from a source node | target → source |
+
+Editing, deleting, rejecting, or disconnecting an upstream node or dependency edge marks every reachable dependent node stale in this direction. Edge deletion uses the persisted pre-delete relationship; an edge kind or endpoint change evaluates both its pre-mutation and post-mutation dependency relationships. Traversal is breadth-first with a visited set, so converging paths and accidental cycles terminate deterministically. The changed origin is never marked stale by a cycle back-edge. Provenance/context traversal uses the inverse relation when walking from a selected node to its semantic ancestors.
+
 ### 9.3 Node structure
 
 ```json
@@ -458,9 +497,12 @@ The MVP supports:
     "y": 405
   },
   "version": 3,
+  "position_version": 7,
   "context_token_count": 147
 }
 ```
+
+`version` is the semantic version used by generation requests and graph-patch preconditions. `position_version` protects layout-only updates. `MOVE_NODE` requires `expected_position_version`, increments only `position_version`, and still appends a graph operation and increments the canvas revision. Semantic mutations require `expected_version`, increment `version`, and invalidate the cached semantic token representation. Layout changes therefore do not invalidate generation context or conflict with semantic patch updates.
 
 ### 9.4 Graph-native requirements
 
@@ -535,6 +577,8 @@ Examples:
 - `PATCH_NODE_METADATA`
 - `MOVE_NODE`
 
+Every direct mutation includes a client-generated `operation_key`. Semantic node operations carry `expected_version`; `MOVE_NODE` carries `expected_position_version`; edge updates/deletes carry the edge `expected_version`. The server stores a request fingerprint with the operation key so network retries are idempotent without accepting conflicting reuse.
+
 ### 11.3 Graph patch principle
 
 The AI never writes directly to the authoritative graph.
@@ -562,6 +606,10 @@ It produces a candidate `GraphPatch`.
   ]
 }
 ```
+
+Every `client_generated_id` must be unique within the patch. An operation may reference an existing entity UUID or a prior client-generated ID. Patch validation builds an operation dependency graph, rejects missing or forward-incompatible references, and requires a selected partial-acceptance subset to include every prerequisite operation.
+
+While holding the patch lock during apply, the server allocates UUIDs for accepted client-generated IDs and persists the resulting `client_id_map` in the same transaction as graph writes. Later operations resolve through that map, and the apply response returns it. Idempotent retries return the persisted map rather than allocating new identities.
 
 ---
 
@@ -591,6 +639,7 @@ CREATE TABLE node (
     metadata jsonb NOT NULL DEFAULT '{}',
     position jsonb NOT NULL DEFAULT '{}',
     version bigint NOT NULL DEFAULT 1,
+    position_version bigint NOT NULL DEFAULT 1,
     context_token_count integer,
     context_representation_version integer NOT NULL DEFAULT 1,
     context_content_hash text,
@@ -623,12 +672,18 @@ CREATE TABLE graph_operation (
     canvas_id uuid NOT NULL REFERENCES canvas(id),
     actor_type text NOT NULL,
     actor_id text,
+    operation_key text NOT NULL,
+    request_fingerprint text NOT NULL,
     operation_type text NOT NULL,
     payload jsonb NOT NULL,
+    result_payload jsonb NOT NULL,
     canvas_revision bigint NOT NULL,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    UNIQUE (canvas_id, actor_type, operation_key)
 );
 ```
+
+For direct API mutations, `operation_key` is a client-generated UUID. `payload` stores the canonical request and `result_payload` stores created entity IDs and resulting versions needed to reproduce the response. Replaying the same key with the same fingerprint returns that original result; reusing it with different content returns `409 Conflict`. Patch application derives a deterministic key from patch ID and operation index.
 
 ### 12.5 Generation run
 
@@ -636,6 +691,9 @@ CREATE TABLE graph_operation (
 CREATE TABLE generation_run (
     id uuid PRIMARY KEY,
     canvas_id uuid NOT NULL REFERENCES canvas(id),
+    operation text NOT NULL,
+    idempotency_key text NOT NULL,
+    request_fingerprint text NOT NULL,
     status text NOT NULL,
     current_stage text,
     base_canvas_revision bigint NOT NULL,
@@ -643,6 +701,8 @@ CREATE TABLE generation_run (
     context_manifest jsonb NOT NULL,
     context_hash text NOT NULL,
     selected_node_ids jsonb NOT NULL,
+    expected_node_versions jsonb NOT NULL,
+    execution_configuration jsonb NOT NULL,
     worker_id text,
     lease_token uuid,
     lease_epoch bigint NOT NULL DEFAULT 0,
@@ -654,7 +714,8 @@ CREATE TABLE generation_run (
     error jsonb,
     created_at timestamptz NOT NULL,
     started_at timestamptz,
-    completed_at timestamptz
+    completed_at timestamptz,
+    UNIQUE (canvas_id, idempotency_key)
 );
 ```
 
@@ -677,21 +738,39 @@ CREATE TABLE generation_stage (
 );
 ```
 
-### 12.7 Generation event
+### 12.7 Canvas event cursor
+
+Canvas-scoped SSE replay requires one monotonic cursor shared by every run on the canvas.
+
+```sql
+CREATE TABLE canvas_event_cursor (
+    canvas_id uuid PRIMARY KEY REFERENCES canvas(id),
+    last_sequence bigint NOT NULL DEFAULT 0
+);
+```
+
+The cursor row is created atomically with every new canvas. The migration that introduces this table backfills exactly one row for every existing canvas. Event append increments `last_sequence` and inserts the event in the same short transaction. This serializes event numbering per canvas without locking the canvas graph-state row.
+
+### 12.8 Generation event
 
 ```sql
 CREATE TABLE generation_event (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    canvas_id uuid NOT NULL REFERENCES canvas(id),
     run_id uuid NOT NULL REFERENCES generation_run(id),
-    sequence bigint NOT NULL,
+    canvas_sequence bigint NOT NULL,
+    run_sequence bigint NOT NULL,
     event_type text NOT NULL,
     payload jsonb NOT NULL,
     created_at timestamptz NOT NULL,
-    UNIQUE (run_id, sequence)
+    UNIQUE (canvas_id, canvas_sequence),
+    UNIQUE (run_id, run_sequence)
 );
 ```
 
-### 12.8 Graph patch
+`canvas_sequence` is the SSE replay cursor. `run_sequence` preserves ordering within one run for diagnostics and validation.
+
+### 12.9 Graph patch
 
 ```sql
 CREATE TABLE graph_patch (
@@ -700,11 +779,36 @@ CREATE TABLE graph_patch (
     canvas_id uuid NOT NULL REFERENCES canvas(id),
     base_canvas_revision bigint NOT NULL,
     operations jsonb NOT NULL,
+    client_id_map jsonb NOT NULL DEFAULT '{}',
     status text NOT NULL,
     created_at timestamptz NOT NULL,
+    decided_at timestamptz,
     applied_at timestamptz
 );
 ```
+
+Allowed patch statuses are `pending`, `applied`, `partially_applied`, and `rejected`.
+
+### 12.10 Graph patch operation decision
+
+Partial acceptance and auditability require an explicit decision for every reviewed candidate operation.
+
+```sql
+CREATE TABLE graph_patch_operation_decision (
+    id uuid PRIMARY KEY,
+    patch_id uuid NOT NULL REFERENCES graph_patch(id),
+    operation_index integer NOT NULL,
+    decision text NOT NULL,
+    reason text,
+    actor_type text NOT NULL,
+    actor_id text,
+    graph_operation_id bigint REFERENCES graph_operation(id),
+    decided_at timestamptz NOT NULL,
+    UNIQUE (patch_id, operation_index)
+);
+```
+
+Allowed operation decisions are `accepted`, `rejected`, and `skipped_conflict`. `graph_operation_id` is populated only when the candidate operation is applied. A full rejection records `rejected` for every candidate operation; a nonconflicting apply records `skipped_conflict` for operations that fail preconditions.
 
 ---
 
@@ -731,7 +835,7 @@ Context selection is operation-specific and token-budgeted.
 - Global pinned constraints
 - Current operation
 - User instruction
-- Node IDs and versions
+- Node IDs, semantic versions, and position versions where spatial state is relevant
 
 #### High priority
 
@@ -848,24 +952,41 @@ A fixed reserve must account for:
 
 ## 14. Generation Pipeline
 
+The canonical journey uses multiple operation-specific generation runs. Research evidence must be reviewed and applied before it can be selected for opportunity synthesis.
+
 ```mermaid
 flowchart TD
-    A[Selected nodes] --> B[Plan]
-    B --> C[Research]
-    C --> D[Extract claims]
-    D --> E[Cluster evidence]
-    E --> F[Synthesize candidates]
-    F --> G[Critique candidates]
-    G --> H[Construct GraphPatch]
-    H --> I[User review]
-    I --> J[Apply accepted operations]
+    A[Goal and constraints] --> B[Generate strategies run]
+    B --> C[Review and apply strategy patch]
+    C --> D[Select strategy]
+    D --> E[Research evidence run]
+    E --> F[Progressive provisional evidence]
+    F --> G[Review and apply evidence patch]
+    G --> H[Select accepted evidence]
+    H --> I[Synthesize opportunities run]
+    I --> J[Review and apply opportunity patch]
 ```
 
-### 14.1 Stage definitions
+### 14.1 Operation stage plans
+
+| Operation | Required stages |
+|---|---|
+| `generate_strategies` | Plan → Patch construction |
+| `research_evidence` | Plan → Research → Extract → Cluster → Patch construction |
+| `synthesize_opportunities` | Synthesize → Critique → Patch construction |
+| `regenerate_stale` | Resolve the affected operation plan from the stale node kind, then execute only that plan |
+
+Only stages in the selected operation plan execute. Every executed stage is checkpointed independently.
+
+Evidence emitted during research progress is provisional. It may be inspected as soon as a normalized extraction batch passes schema validation, but it does not become authoritative graph state until the user accepts the final evidence patch. Opportunity synthesis accepts only applied, non-rejected evidence nodes selected by the user; it never consumes provisional evidence.
+
+### 14.2 Stage definitions
 
 #### Plan
 
-Produces:
+For `generate_strategies`, produces at least three materially different strategies adapted from the curated ontology.
+
+For `research_evidence`, produces:
 
 - Selected opportunity strategy
 - Research questions
@@ -879,7 +1000,7 @@ Uses:
 - OpenAI web search
 - GitHub API
 - Stack Exchange API
-- User-supplied URLs
+- User-supplied URLs or text
 
 #### Extract
 
@@ -890,6 +1011,12 @@ Produces normalized:
 - Strength
 - Classification
 - Limitations
+
+#### Cluster
+
+Deterministically groups normalized claims by the exact tuple of evidence type, sorted `topic_keys`, sorted `mechanism_tags`, and contradiction target while preserving source IDs and `independence_key` boundaries.
+
+Clustering is an application-layer stage shared by every execution profile, not a model-provider call. It is checkpointed as `clustering`, carries a versioned identity such as `deterministic_clusterer_v1`, and participates in stage input hashing.
 
 #### Synthesize
 
@@ -916,6 +1043,18 @@ Produces typed graph operations only.
 
 ## 15. Long-Running Job Architecture
 
+### 15.0 Durable-layer ports and phase boundary
+
+The durable-job layer depends on three interfaces rather than Phase 3 implementations:
+
+- `RunContextFactory`
+- `ExecutionProfileResolver`
+- `StageOutputValidator`
+
+Phase 2 defines their stable envelopes and test-only deterministic adapters. The test profile is never selectable by a product request. Phase 3 supplies the production semantic context factory, approved execution-profile resolver, and stage-specific structured-output validators. The composition root rejects an unavailable profile; it never falls back to a test adapter or another live profile.
+
+This lets queue, lease, checkpoint, retry, and SSE behavior be completed with deterministic test jobs without duplicating or prematurely implementing the intelligence pipeline. The approved `live_v1`, `demo_hybrid_v1`, and `replay_v1` profiles are enabled for product requests only when PG-020 integrates the Phase 3 implementations.
+
 ### 15.1 Trigger
 
 ```http
@@ -925,7 +1064,9 @@ POST /api/canvases/{canvas_id}/generation-runs
 ```json
 {
   "selected_node_ids": ["node_14", "node_15"],
-  "operation": "evolve",
+  "operation": "research_evidence",
+  "instruction": "Find current evidence for this strategy.",
+  "execution_profile_id": "live_v1",
   "idempotency_key": "71a43...",
   "expected_node_versions": {
     "node_14": 3,
@@ -948,23 +1089,44 @@ HTTP/1.1 202 Accepted
 }
 ```
 
+Run creation occurs in one short transaction:
+
+1. Validate the requested operation and selected-node kinds.
+2. Lock and verify every `expected_node_versions` entry.
+3. Capture the canvas revision, semantic context snapshot, context manifest, context hash, and immutable execution configuration.
+4. Create the queued run and commit.
+
+`idempotency_key` is unique per canvas. Repeating the same key with the same semantic request returns the existing run; reusing it with a different operation, selected nodes, versions, or instruction returns `409 Conflict`. The endpoint returns `202 Accepted` immediately and never executes provider work inline.
+
+```http
+GET /api/generation-runs/{run_id}
+```
+
+The status endpoint returns the run state, current stage, attempts, terminal error when present, and ready patch ID when available.
+
 ### 15.2 Job state machine
 
 ```text
 queued
   → running
-      → planning
-      → researching
-      → extracting
-      → synthesizing
-      → critiquing
+      → one or more configured stages:
+          planning
+          researching
+          extracting
+          clustering
+          synthesizing
+          critiquing
+          constructing_patch
       → patch_ready
   → completed
 
 Terminal alternatives:
   failed
+      → queued when an explicit safe retry is accepted
   cancelled
 ```
+
+Only stages in the operation plan from section 14.1 are visited. `patch_ready` means the candidate patch has been persisted; the run then becomes `completed` without waiting for user review. Patch review has its own lifecycle.
 
 ### 15.3 Worker claiming
 
@@ -1004,6 +1166,13 @@ A stale worker must be unable to checkpoint or finalize after reassignment.
 ### 15.5 Heartbeat
 
 A dedicated lease-keeper thread uses its own database connection and performs a conditional update every 10–15 seconds.
+
+```python
+LEASE_DURATION_SECONDS = 60
+HEARTBEAT_INTERVAL_SECONDS = 12
+```
+
+Lease timestamps use PostgreSQL `now()`, never application-host clocks. A renewal extends expiry to database time plus the full lease duration and succeeds only for the current token and epoch. Reclaim is permitted only after database time passes `lease_expires_at`. Tests must cover a delayed heartbeat that remains within the lease, expiry and reclaim, and a late renewal from the fenced worker.
 
 The main orchestration thread can block on OpenAI without holding a database transaction.
 
@@ -1051,6 +1220,7 @@ It must also release stage-local caches, dereference large response payloads, an
 | Append progress event | Short atomic or autocommit | No |
 | Create final patch | Short atomic | No |
 | Mark failed or cancelled | Short atomic | No |
+| Requeue an explicitly retried run | Short atomic with row lock | No |
 | Apply patch | Short atomic with row locks | No |
 
 ### 16.3 Stage protocol
@@ -1106,14 +1276,12 @@ Example retry behavior:
 Planning completed
 Research completed
 Extraction completed
-Synthesis completed
-Critique failed
+Clustering failed
         ↓ retry
 Planning reused
 Research reused
 Extraction reused
-Synthesis reused
-Critique resumes
+Clustering resumes
 ```
 
 This avoids duplicate research, model calls, and billing after transient failures.
@@ -1125,7 +1293,7 @@ This avoids duplicate research, model calls, and billing after transient failure
 ### 17.1 One stream per canvas
 
 ```http
-GET /api/canvases/{canvas_id}/events?after=918
+GET /api/canvases/{canvas_id}/events?after={canvas_sequence}
 ```
 
 Do not open one connection per generation run.
@@ -1134,6 +1302,7 @@ Do not open one connection per generation run.
 
 - `run.started`
 - `run.resumed`
+- `run.retry_requested`
 - `stage.started`
 - `stage.progress`
 - `research.query_created`
@@ -1146,15 +1315,19 @@ Do not open one connection per generation run.
 - `run.failed`
 - `run.cancelled`
 
+`research.source_found` and `evidence.extracted` payloads include `provisional: true` until the evidence patch is accepted. `patch.ready` includes the candidate patch ID. Progress events never imply that graph state was mutated.
+
 ### 17.3 Persistence and replay
 
 Events are persisted in PostgreSQL.
 
 The SSE endpoint:
 
-1. Replays events after the supplied sequence.
+1. Replays committed events with `canvas_sequence` greater than the supplied cursor, in ascending order.
 2. Waits for new events.
 3. Reconnects safely after disconnects.
+
+Every emitted event includes both `canvas_sequence` and `run_sequence`. Concurrent runs on the same canvas share the canvas cursor and cannot produce duplicate replay positions. Integration tests must interleave events from at least two runs and prove that reconnect neither skips nor duplicates committed events.
 
 `LISTEN/NOTIFY` may be used as a wake-up mechanism, but the event table remains authoritative.
 
@@ -1193,17 +1366,20 @@ The setup guide must include the exact development-server and proxy configuratio
 
 ### 18.1 Entity-level versions
 
-Each node and edge has an incrementing `version`.
+Each edge has an incrementing semantic `version`. Each node has an incrementing semantic `version` plus an independent `position_version` for spatial changes.
 
-Generated update or delete operations include `expected_version`.
+Generated semantic update or delete operations include `expected_version`. `MOVE_NODE` includes `expected_position_version`. Moving a node must not increment its semantic version or invalidate semantic context caches; semantic edits must not create false position conflicts.
 
 ### 18.2 Conflict handling
 
-- `ADD_NODE`: usually safe
-- `ADD_EDGE`: safe if endpoints still exist
-- `UPDATE_NODE`: requires expected version
-- `DELETE_NODE`: requires expected version
-- `UPDATE_EDGE`: requires expected version
+- `ADD_NODE`: requires a unique patch-local identity
+- `ADD_EDGE`: requires endpoints to exist or resolve through accepted prerequisite operations
+- `UPDATE_NODE` and `PATCH_NODE_METADATA`: require `expected_version`
+- `MOVE_NODE`: requires `expected_position_version`
+- `DELETE_NODE`: requires `expected_version` and explicit handling of incident edges
+- `UPDATE_EDGE` and `DELETE_EDGE`: require the edge `expected_version`
+
+`base_canvas_revision` is an audit and context marker, not a global optimistic-lock precondition. Apply conflicts are decided by the touched entity versions and dependency validation, so an unrelated edit or position-only canvas revision change cannot reject an otherwise valid semantic patch.
 
 ### 18.3 Atomic application
 
@@ -1215,11 +1391,14 @@ The endpoint:
 2. Locks the canvas.
 3. Locks touched nodes and edges in deterministic ID order.
 4. Validates expected versions.
-5. Applies accepted operations.
-6. Writes graph-operation records.
-7. Increments canvas revision.
-8. Marks the patch applied.
-9. Commits.
+5. Validates the accepted operation dependency graph and prerequisite closure.
+6. Allocates and persists the accepted `client_generated_id` to UUID map.
+7. Resolves references and applies accepted operations in dependency order.
+8. Writes idempotent graph-operation records and links them to `accepted` patch-operation decisions.
+9. Records `rejected` and `skipped_conflict` decisions for every reviewed operation not applied.
+10. Increments canvas revision when at least one graph operation was applied.
+11. Sets the patch to `applied`, `partially_applied`, or `rejected` and records decision timestamps.
+12. Commits and returns the persisted client ID map.
 
 ### 18.4 Isolation level
 
@@ -1236,6 +1415,8 @@ The user may:
 - Reject all
 - Apply nonconflicting operations only
 - Regenerate from current graph state
+
+Every reviewed operation receives one durable `graph_patch_operation_decision`. The reject endpoint records all candidate operations as rejected without mutating graph state. Retrying an already-decided patch is idempotent and returns the existing decision result.
 
 ---
 
@@ -1313,7 +1494,17 @@ The worker checks cancellation:
 - After each external call
 - Before finalization
 
-### 20.4 User-visible error policy
+### 20.4 Explicit retry
+
+```http
+POST /api/generation-runs/{run_id}/retry
+```
+
+Retry is accepted only when the run is `failed`, the structured error is marked retryable, and `attempt < max_attempts`. In one short transaction the endpoint locks the run, verifies no active lease, changes status to `queued`, and appends `run.retry_requested`. The immutable context, execution configuration, and completed checkpoints remain unchanged. Cancelled, non-retryable, lease-owned, or exhausted poison runs return `409 Conflict`.
+
+Reclaiming the run increments the attempt and emits `run.resumed`. The worker starts at the first incomplete checkpoint with the exact original semantic inputs.
+
+### 20.5 User-visible error policy
 
 Failures must:
 
@@ -1327,11 +1518,11 @@ Failures must:
 
 ## 21. Security and Trust Boundaries
 
-### 21.1 Retrieved content is untrusted
+### 21.1 Retrieved and user-supplied content is untrusted
 
 Requirements:
 
-- Treat page content as data, not instructions
+- Treat page content and user-supplied text as data, not instructions
 - Never execute source-provided commands
 - Keep retrieval and reasoning stages separate
 - Extract into strict schemas
@@ -1403,6 +1594,8 @@ Cache by:
 - Prompt version
 - Context hash
 
+The normalized source cache is stored in PostgreSQL. A research adapter checks the exact cache key before making an external request, records whether a result was reused, preserves the original retrieval timestamp and content hash, and never labels cached evidence as newly retrieved. Versioned keys provide invalidation when prompts, strategies, or context semantics change. Tests must prove that an exact repeat avoids duplicate provider calls and that a changed key does not reuse stale output.
+
 ---
 
 ## 23. Evaluation Harness
@@ -1465,33 +1658,51 @@ The full pipeline should materially outperform the generic prompt baseline on at
 - Partial patch acceptance
 - URL safety checks
 - Stage input hashing
+- Patch-operation decision validation
+- Evidence-rejection eligibility rules
+- Deterministic evidence clustering
+- Graph-operation idempotency and conflicting-key rejection
+- Semantic-versus-position version isolation
+- Patch client-ID dependency validation
+- Edge-kind invalidation direction and cycle termination
 
 ### 24.2 Integration tests
 
 - Queue claiming with concurrent workers
+- Idempotent run creation and conflicting-key rejection
+- Explicit safe retry and exhausted-retry rejection
 - Lease expiry and reclaim
 - Stale worker cannot finalize
-- SSE replay after disconnect
+- Canvas-scoped SSE replay after disconnect with interleaved concurrent runs
 - OpenAI timeout and retry
 - Poison job terminalization
 - Patch conflict behavior
 - Cancellation during external call
 - Cached stage reuse
+- Normalized source-cache hit and changed-key invalidation
+- User-supplied text isolation and prompt-injection resistance
+- Event-cursor migration backfill and new-canvas initialization
+- Full replay of every operation plan through patch construction
 
 ### 24.3 End-to-end tests
 
 - Goal to strategy
 - Strategy to evidence
+- User accepts the evidence patch and selects accepted evidence
 - Evidence to opportunity
 - Critique to graph patch
 - User accepts patch
 - User edits premise
 - Descendants regenerate
 - Canvas reload preserves state
+- Evidence rejection invalidates dependent descendants but preserves independently supported claims
+- Branch comparison and assumption replacement
 
 ---
 
 ## 25. Observability
+
+Instrumentation is implemented with each owning component rather than added as a Phase 5 retrofit. Durable-run tasks add run, stage, queue, retry, and lease telemetry; provider tasks add model, source, token, latency, and cache telemetry; patch tasks add conflict and acceptance telemetry. Demo hardening aggregates and verifies this instrumentation.
 
 ### 25.1 Structured logs
 
@@ -1575,17 +1786,19 @@ Typed stage ports include:
 - Critique provider
 - Patch-construction provider
 
+Deterministic clustering is an application-layer stage rather than a provider port, so it runs identically in every profile.
+
 Concrete adapters include live, fixture-backed, and replay implementations.
 
 Approved execution profiles:
 
-| Profile | Research | Extraction | Synthesis | Critique |
-|---|---|---|---|---|
-| `live_v1` | Live | Live GPT-5.6 | Live GPT-5.6 | Live GPT-5.6 |
-| `demo_hybrid_v1` | Fixture | Fixture | Live GPT-5.6 | Live GPT-5.6 |
-| `replay_v1` | Fixture | Fixture | Fixture | Fixture |
+| Profile | Planning | Research | Extraction | Synthesis | Critique | Patch construction |
+|---|---|---|---|---|---|---|
+| `live_v1` | Live GPT-5.6 | Live | Live GPT-5.6 | Live GPT-5.6 | Live GPT-5.6 | Live GPT-5.6 |
+| `demo_hybrid_v1` | Fixture | Fixture | Fixture | Live GPT-5.6 | Live GPT-5.6 | Live GPT-5.6 |
+| `replay_v1` | Fixture | Fixture | Fixture | Fixture | Fixture | Fixture |
 
-The primary judge-facing profile is `demo_hybrid_v1`. It uses deterministic source and claim fixtures while preserving live GPT-5.6 synthesis, critique, and patch generation.
+The primary judge-facing profile is `demo_hybrid_v1`. It uses deterministic planning, source, and claim fixtures while preserving live GPT-5.6 synthesis, critique, and patch generation.
 
 The emergency fallback is `replay_v1`.
 
@@ -1615,11 +1828,14 @@ fixtures/
         ├── manifest.json
         ├── sources.json
         ├── claims.json
-        ├── planning-output.json
-        ├── synthesis-output.json
-        ├── critique-output.json
+        ├── planning-outputs.json
+        ├── synthesis-outputs.json
+        ├── critique-outputs.json
+        ├── patch-construction-outputs.json
         └── progress-events.json
 ```
+
+The plural output files contain manifest-indexed cases for every operation and semantic input hash used by the bundle. Full replay must provide an output for every provider-backed stage in every supported operation plan, including strategy/evidence/opportunity patch construction.
 
 All fixture payloads pass through the same Pydantic validation used for live provider outputs.
 
@@ -1676,7 +1892,8 @@ GET  /api/canvases/{canvas_id}/operations?after={revision}
 POST /api/canvases/{canvas_id}/generation-runs
 GET  /api/generation-runs/{run_id}
 POST /api/generation-runs/{run_id}/cancel
-GET  /api/canvases/{canvas_id}/events?after={sequence}
+POST /api/generation-runs/{run_id}/retry
+GET  /api/canvases/{canvas_id}/events?after={canvas_sequence}
 ```
 
 ### 27.4 Patches
@@ -1731,20 +1948,23 @@ Official rules:
 
 - Canvas CRUD
 - Node and edge CRUD
-- Entity versions
-- Graph operations
+- Independent semantic and position versions
+- Idempotent graph operations
 - Auto-layout
 - Save and reload
 
 ### Phase 2: Durable jobs
 
 - Generation-run model
+- Durable-layer ports and deterministic test adapters
+- Idempotent run creation and status APIs
 - PostgreSQL queue
 - Worker lease and fencing
 - Stage checkpoints and resume semantics
 - Worker recycling limits
-- SSE event stream and local streaming verification
+- Canvas-sequenced SSE event stream and local streaming verification
 - Cancellation
+- Explicit safe retry
 - Failure states
 
 ### Phase 3: Intelligence pipeline
@@ -1755,6 +1975,9 @@ Official rules:
 - GitHub integration
 - Stack Exchange integration
 - Claim extraction
+- Normalized topic, mechanism, and independence keys
+- Deterministic evidence clustering
+- Progressive provisional evidence and explicit accepted-evidence selection
 - Opportunity synthesis
 - Critique
 - GraphPatch generation
@@ -1765,10 +1988,13 @@ Official rules:
 
 - Patch preview
 - Partial acceptance
+- Per-operation decision audit
+- Client-generated-ID mapping and operation dependency closure
 - Conflict detection
 - Transactional apply
 - Placeholder lifecycle
 - Transitive stale propagation
+- Cycle-safe edge-kind-directed invalidation
 - Explicit stale-branch regeneration
 
 ### Phase 5: Demo hardening
@@ -1793,7 +2019,7 @@ The MVP is complete when a first-time user can:
 3. Generate three materially different strategies.
 4. Select a strategy and run evidence research.
 5. Inspect source-backed claims.
-6. Generate three structured opportunities.
+6. Accept the evidence patch, select accepted evidence, and generate three structured opportunities.
 7. Inspect assumptions, contradictions, and validation tests.
 8. Trace every opportunity to supporting claims.
 9. Accept a graph patch transactionally.
@@ -1827,18 +2053,23 @@ The MVP is complete when a first-time user can:
 
 ---
 
-## 32. Open Questions
+## 32. Decisions and Open Questions
 
-These do not block the architecture, but should be resolved during implementation:
+### 32.1 Resolved decisions
 
-1. Should generated evidence nodes appear progressively or only after claim extraction completes?
-2. Should rejected evidence remain visible as a muted node for auditability?
-3. How much source text should be stored versus only extracted claims and hashes?
-4. Should explicit stale-node regeneration replace the old branch or always create a parallel branch?
-5. Should the first version support automatic semantic similarity, or rely only on explicit graph neighborhoods?
-6. Should the evaluation harness ship in the product UI or remain an internal benchmark?
-7. What is the final product name?
-8. Which canonical opportunity should be used in the demo?
+1. **DQ-001 — Progressive evidence display:** validated extraction batches appear progressively as provisional evidence. They become authoritative and selectable for synthesis only after the user accepts the evidence patch.
+
+### 32.2 Open questions
+
+These do not block the architecture, but must be resolved before the dependent implementation task:
+
+2. **DQ-002:** Should rejected evidence remain visible as a muted node for auditability?
+3. **DQ-003:** What source content may be retained, for how long, and how is it removed consistently from graph nodes, stage outputs, persisted event payloads, normalized caches, fixture bundles, and canvas deletion?
+4. **DQ-004:** Should explicit stale-node regeneration replace the old branch or always create a parallel branch?
+5. **DQ-005:** Should the first version support automatic semantic similarity, or rely only on explicit graph neighborhoods?
+6. **DQ-006:** Should the evaluation harness ship in the product UI or remain an internal benchmark?
+7. **DQ-007:** What is the final product name?
+8. **DQ-008:** Which canonical opportunity should be used in the demo?
 
 ---
 
@@ -1846,12 +2077,14 @@ These do not block the architecture, but should be resolved during implementatio
 
 - PostgreSQL is the only stateful infrastructure.
 - The graph uses relational node and edge tables.
+- Direct graph mutations are idempotent through per-canvas operation keys and request fingerprints.
+- Semantic and position versions are independent; layout changes never invalidate semantic generation inputs.
 - The worker queue uses `SELECT ... FOR UPDATE SKIP LOCKED`.
 - Every lease uses a token and fencing epoch.
 - No database transaction contains an external network call.
 - SSE streams progress; it does not own job execution.
 - One SSE stream is opened per canvas.
-- Events are persisted and replayable.
+- Events are persisted and replayable through a monotonic canvas-scoped sequence.
 - GPT-5.6 produces structured outputs.
 - The AI creates candidate graph patches, never direct graph writes.
 - Patch application uses row locks and entity versions.
@@ -1859,18 +2092,27 @@ These do not block the architecture, but should be resolved during implementatio
 - Node token counts are precomputed from semantic content.
 - Upstream changes cause transitive staleness, never automatic recursive regeneration.
 - Failed runs resume from completed stage checkpoints when semantic inputs and provider identity match.
+- Safe explicit retry requeues only retryable, non-exhausted failed runs with their immutable inputs unchanged.
+- The durable layer uses injectable context, profile, and output-validation ports with test-only Phase 2 adapters.
 - Worker processes recycle after bounded job counts or lifetimes.
 - Execution profiles are composed through typed ports and adapters.
 - Fixture matching is strict and never silently falls back to live APIs.
 - Every opportunity must expose evidence, assumptions, contradictions, and validation.
+- Research and synthesis are separate operation-specific runs with an explicit accepted-evidence selection gate.
+- Deterministic evidence clustering is checkpointed and shared by every execution profile.
+- Validated evidence streams progressively as provisional output and becomes authoritative only through patch acceptance.
+- Rejected evidence is excluded from future reasoning and causes dependent accepted descendants to become stale.
+- Every reviewed patch operation receives a durable accepted, rejected, or skipped-conflict decision.
+- Graph patches persist client-generated-ID mappings and apply operations in validated dependency order.
+- Dependency invalidation follows the edge-kind direction table and is cycle-safe.
 - Live research is backed by a hybrid deterministic demo profile and a full replay fallback.
 - The MVP targets Work & Productivity.
 
 ---
 
-## 34. Revision Notes for v2
+## 34. Revision Notes
 
-The following refinements are now part of the frozen architecture:
+### v2
 
 - Automatic descendant regeneration was replaced with transitive cascade invalidation.
 - Context packing now defines deterministic intra-tier ranking and contradiction reserves.
@@ -1881,6 +2123,23 @@ The following refinements are now part of the frozen architecture:
 - Fixture bundles are immutable, versioned, schema-validated, and strictly matched.
 - Hybrid demo mode uses deterministic evidence with live GPT-5.6 reasoning.
 - Full replay mode is retained only as an emergency fallback.
+
+### v3
+
+- Canvas-scoped SSE replay now uses a monotonic cursor safe for interleaved concurrent runs.
+- The canonical workflow now uses separate strategy, research, and synthesis runs with explicit user review gates.
+- Evidence clustering is a deterministic checkpointed application stage.
+- Progressive evidence display is resolved: validated batches are provisional until their patch is accepted.
+- Patch-operation decisions are persisted explicitly for partial acceptance and auditability.
+
+### v4
+
+- Direct graph operations are idempotent, and position-only changes use a separate version.
+- Phase 2 durable-job work uses explicit test-only ports instead of depending on later intelligence implementations.
+- Safe failed-run retry is an explicit API and state transition.
+- Replay profiles now cover planning and patch construction with complete fixture outputs.
+- Deterministic clustering consumes normalized claim topic and mechanism keys.
+- Patch-local IDs, dependency closure, dependency-edge directions, and cycle-safe invalidation are explicit.
 
 ---
 
