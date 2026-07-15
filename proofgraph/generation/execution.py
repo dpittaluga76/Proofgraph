@@ -30,7 +30,11 @@ from proofgraph.generation.schemas import (
     RunExecutionConfiguration,
     StageResultEnvelope,
 )
-from proofgraph.generation.telemetry import emit_telemetry, telemetry_context
+from proofgraph.generation.telemetry import (
+    emit_patch_regeneration_terminal,
+    emit_telemetry,
+    telemetry_context,
+)
 
 OPERATION_STAGE_PLANS: dict[str, tuple[str, ...]] = {
     RunOperation.GENERATE_STRATEGIES: ("planning", "constructing_patch"),
@@ -217,6 +221,11 @@ def _cancel_if_requested(lease: RunLease, *, stage_id: Any | None = None) -> boo
             stage_id=stage_id,
         )
     emit_telemetry("run.cancelled", run_id=lease.run_id, lease_epoch=lease.lease_epoch)
+    emit_patch_regeneration_terminal(
+        run_id=lease.run_id,
+        canvas_id=lease.canvas_id,
+        status=RunStatus.CANCELLED,
+    )
     return True
 
 
@@ -413,6 +422,11 @@ def _fail_run(
         retryable=persisted_error.retryable,
         stage=persisted_error.stage,
     )
+    emit_patch_regeneration_terminal(
+        run_id=lease.run_id,
+        canvas_id=lease.canvas_id,
+        status=RunStatus.FAILED,
+    )
 
 
 def _persist_patch_then_complete(lease: RunLease, patch_output: Any) -> bool:
@@ -457,6 +471,11 @@ def _persist_patch_then_complete(lease: RunLease, patch_output: Any) -> bool:
             )
     if patch is None:
         emit_telemetry("run.cancelled", run_id=lease.run_id, lease_epoch=lease.lease_epoch)
+        emit_patch_regeneration_terminal(
+            run_id=lease.run_id,
+            canvas_id=lease.canvas_id,
+            status=RunStatus.CANCELLED,
+        )
         return False
     emit_telemetry("patch.ready", run_id=lease.run_id, patch_id=patch.id)
 
@@ -485,6 +504,11 @@ def _persist_patch_then_complete(lease: RunLease, patch_output: Any) -> bool:
             terminal_once=True,
         )
     emit_telemetry("run.completed", run_id=lease.run_id, patch_id=patch.id)
+    emit_patch_regeneration_terminal(
+        run_id=lease.run_id,
+        canvas_id=lease.canvas_id,
+        status=RunStatus.COMPLETED,
+    )
     return True
 
 

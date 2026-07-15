@@ -56,46 +56,6 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 ### Phase 4 — Patch review and dependency-aware regeneration
 
-#### PG-021 — Build graph-patch preview and selective review
-
-**Depends on:** PG-018, PG-020
-
-**Outcome:** Let users inspect and choose generated graph operations before any authoritative mutation.
-
-**Done when:**
-
-- Patch previews distinguish additions, updates, deletes, provenance, assumptions, risks, and contradictions.
-- Opportunity review renders evidence strength, novelty, builder fit, technical feasibility, distribution clarity, and operational burden separately, with the distribution and defensibility rationale visible and no aggregate quality score substituted.
-- `GET /api/graph-patches/{patch_id}` returns the immutable candidate operations and any existing per-operation decisions.
-- A user can accept all, accept selected operations, apply nonconflicting operations only, reject all, or request regeneration.
-- Dependencies between selected operations are shown in review; selection includes all required prerequisites or is blocked with an actionable dependency error.
-- `POST /api/graph-patches/{patch_id}/reject` records every candidate operation as rejected without mutating graph state and is idempotent on retry.
-- `POST /api/graph-patches/{patch_id}/regenerate` accepts revision feedback and an idempotency key; in one short transaction it first revalidates the original selected entities/current profile, then rejects every undecided operation with reason `regeneration_requested`, snapshots current semantic state, creates one linked queued run, and performs no provider work.
-- Invalid current inputs/profile return `409` without changing the pending patch.
-- Exact regeneration retry returns the linked run, while conflicting key reuse or a non-pending patch returns `409`; `GET` exposes the durable `regenerated_by_run_id` lineage.
-- Patch-regeneration telemetry records request, idempotent replay, validation/profile conflict, original-patch rejection, linked run, and terminal outcome with patch/run/canvas identifiers.
-- Rejected patches and per-operation decisions remain auditable without appearing as accepted graph state.
-
-#### PG-022 — Apply accepted patch operations transactionally
-
-**Depends on:** PG-021
-
-**Outcome:** Apply user-approved operations atomically with deterministic locking and entity-version checks.
-
-**Done when:**
-
-- Apply locks the patch, canvas, and touched entities in deterministic ID order under PostgreSQL `READ COMMITTED`.
-- `POST /api/graph-patches/{patch_id}/apply` accepts the requested operation subset and optional nonconflicting-only mode.
-- Expected versions, endpoint existence, dependency closure, and patch-local identity references are validated before writes.
-- `DELETE_NODE` applies only after accepted prerequisite operations removed every incident edge and deleted, rescoped, or reanchored every branch constraint reference; a concurrently added dependency returns a conflict and prevents the node deletion.
-- The server allocates deterministic-on-retry UUID mappings for accepted `client_generated_id` values, persists the `client_id_map`, resolves dependent references in topological order, and returns the map.
-- Each applied operation uses a deterministic patch-derived operation key so an exact retry returns the original outcome and a conflicting reuse is rejected.
-- `base_canvas_revision` remains audit context rather than a global apply precondition; only touched-entity versions and dependency validation cause conflicts, and a conflicted prerequisite skips its dependents.
-- Accepted operations, linked graph-operation records, accepted/rejected/skipped-conflict decisions, canvas revision, timestamps, and final patch status commit together.
-- Conflicts return enough information to review, apply only nonconflicting operations, or regenerate from current state.
-- Patch telemetry records conflict outcomes, accepted/rejected/skipped counts, apply duration, and accepted-operation ratio.
-- Tests cover full apply, partial apply, rejection, rollback, idempotency, and concurrent conflict.
-
 #### PG-023 — Implement transitive staleness and explicit regeneration
 
 **Depends on:** PG-022, DQ-004, DQ-005
@@ -254,9 +214,17 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 ## In Progress
 
-No active task. The next planned task is PG-021.
+None.
 
 ## Done
+
+### Phase 4 patch review and transactional apply — PG-021 and PG-022
+
+**Completed:** July 15, 2026
+
+**Outcome:** Added an immutable graph-patch review surface and PostgreSQL-transactional application workflow. Users can inspect exact candidates, provenance, assumptions, risks, contradictions, dependencies, and all six opportunity-quality dimensions; accept all or a dependency-closed subset; apply only nonconflicting operations; reject all; or request one idempotently linked regeneration run. Accepted candidates materialize through deterministic patch-local identities and operation keys with append-only graph-operation audit records and an explicit decision for every reviewed operation.
+
+**Verification:** Focused API tests cover review serialization, rejection without graph mutation, regeneration revalidation/profile conflicts/lineage/idempotency/terminal telemetry, full and partial apply, strict rollback, nonconflicting dependency skips, node-deletion prerequisites, deterministic identity replay, and a concurrent dependency writer. UI tests cover separate quality-dimension rendering, visible distribution/defensibility rationale, dependency-safe selection, and nonconflicting apply with canvas refresh. The complete backend suite passes (221 tests); migration drift, Django, and PostgreSQL readiness checks pass; Ruff formatting and lint pass; the frontend formatting/lint/typecheck/unit/build gate passes (16 unit tests); and the live PostgreSQL-backed Playwright journey passes.
 
 ### Phase 3 final handoff remediation — PG-016 through PG-020
 

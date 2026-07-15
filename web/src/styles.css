@@ -852,6 +852,10 @@ legend {
   box-shadow: 0 2rem 6rem rgb(10 20 15 / 28%);
 }
 
+.modal--wide {
+  width: min(72rem, 100%);
+}
+
 .modal > header {
   display: flex;
   align-items: flex-start;
@@ -868,6 +872,235 @@ legend {
   background: #fff;
   font-size: 1.3rem;
   line-height: 1;
+}
+
+.patch-loader,
+.patch-regeneration {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.patch-loader__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+}
+
+.patch-review {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.patch-summary {
+  padding: 0.9rem 1rem;
+  border: 1px solid #ced5cf;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.patch-summary > div {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.patch-summary p {
+  margin: 0.6rem 0 0;
+  color: #59655f;
+  line-height: 1.5;
+}
+
+.patch-status {
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
+  color: #245c49;
+  background: #e6f2ec;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.patch-status--rejected {
+  color: #95342f;
+  background: #fff0ed;
+}
+
+.patch-status--partially_applied {
+  color: #7b5a17;
+  background: #fff6dc;
+}
+
+.patch-operation-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.patch-operation {
+  padding: 1rem;
+  border: 1px solid #ccd4cd;
+  border-left: 0.35rem solid #4d8872;
+  border-radius: 0.8rem;
+  background: #fff;
+}
+
+.patch-operation--deletion {
+  border-left-color: #b94c46;
+}
+
+.patch-operation--update,
+.patch-operation--position {
+  border-left-color: #bf8a2e;
+}
+
+.patch-operation > header {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.patch-operation__selection {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  color: #17211d;
+  font-size: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.patch-operation__selection input {
+  width: 1rem;
+  min-height: auto;
+  margin-top: 0.25rem;
+}
+
+.patch-operation__selection span {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.patch-operation__selection small,
+.semantic-role,
+.patch-dependencies > span,
+.patch-provenance > span,
+.quality-grid span,
+.rationale-grid span,
+.review-signals span {
+  color: #607068;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.semantic-role {
+  padding: 0.3rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: #eef3ef;
+}
+
+.patch-dependencies,
+.patch-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.patch-dependencies code,
+.patch-provenance code {
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.3rem;
+  color: #3d4b45;
+  background: #f0f3f1;
+  font-size: 0.72rem;
+}
+
+.patch-decision {
+  margin: 0.75rem 0 0;
+  color: #29634e;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.patch-decision--rejected,
+.patch-decision--skipped_conflict {
+  color: #9a3e38;
+}
+
+.quality-grid,
+.rationale-grid,
+.review-signals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.quality-grid section,
+.rationale-grid section,
+.review-signals section {
+  padding: 0.75rem;
+  border: 1px solid #e0e5e1;
+  border-radius: 0.6rem;
+  background: #f8faf8;
+}
+
+.quality-grid strong {
+  display: block;
+  margin-top: 0.25rem;
+  color: #245c49;
+  text-transform: capitalize;
+}
+
+.quality-grid p,
+.rationale-grid p,
+.review-signals p,
+.review-signals ul {
+  margin: 0.35rem 0 0;
+  color: #526058;
+  font-size: 0.83rem;
+  line-height: 1.45;
+}
+
+.review-signals ul {
+  padding-left: 1rem;
+}
+
+.candidate-json {
+  margin-top: 0.8rem;
+  color: #4f5c55;
+  font-size: 0.8rem;
+}
+
+.candidate-json pre {
+  max-height: 18rem;
+  padding: 0.75rem;
+  overflow: auto;
+  border-radius: 0.55rem;
+  color: #dce9e1;
+  background: #1c2923;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.patch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding-top: 0.25rem;
+}
+
+.patch-regeneration {
+  padding: 1rem;
+  border: 1px solid #d5dbd6;
+  border-radius: 0.75rem;
+  background: #f1f5f2;
 }
 
 .conflict-copy {
@@ -904,6 +1137,21 @@ legend {
 
   .workspace-grid {
     grid-template-columns: minmax(0, 1fr) 19rem;
+  }
+}
+
+@media (max-width: 700px) {
+  .patch-loader__row,
+  .quality-grid,
+  .rationale-grid,
+  .review-signals {
+    grid-template-columns: 1fr;
+  }
+
+  .patch-operation > header,
+  .patch-summary > div {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

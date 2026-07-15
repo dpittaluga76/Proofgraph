@@ -9,6 +9,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import type { GraphPatch } from "./api";
 import type { GraphCanvas, GraphEdge, GraphNode, NodeKind } from "./graph";
 
 const CANVAS_ID = "11111111-1111-4111-8111-111111111111";
@@ -596,6 +597,185 @@ describe("App", () => {
     expect(await screen.findByText("Canvas reloaded.")).toBeVisible();
     expect(screen.getByDisplayValue("Current server goal")).toBeVisible();
     expect(screen.queryByText("Original goal")).not.toBeInTheDocument();
+  });
+
+  it("reviews all six opportunity dimensions and applies a dependency-safe selection", async () => {
+    const graph = canvas();
+    const fetchMock = readyFetch();
+    render(<App />);
+    await screen.findByText("Workspace ready");
+    await openCanvas(fetchMock, graph);
+
+    const evidenceOperationId = "evidence-operation";
+    const opportunityOperationId = "opportunity-operation";
+    const patch: GraphPatch = {
+      patch_id: "99999999-9999-4999-8999-999999999999",
+      run_id: "88888888-8888-4888-8888-888888888888",
+      canvas_id: CANVAS_ID,
+      base_canvas_revision: 0,
+      status: "pending",
+      operations: [
+        {
+          operation_index: 0,
+          operation_id: evidenceOperationId,
+          candidate: {
+            op: "ADD_NODE",
+            operation_id: evidenceOperationId,
+            node: {
+              client_generated_id: "evidence-node",
+              kind: "evidence",
+              title: "Interview notes",
+            },
+          },
+          dependency_operation_ids: [],
+          dependency_operation_indices: [],
+          missing_dependency_operation_ids: [],
+          review: {
+            change_type: "addition",
+            entity_type: "node",
+            semantic_role: "evidence",
+            title: "Interview notes",
+            provenance_node_ids: [],
+            assumptions: [],
+            risks: [],
+            contradiction: null,
+            quality_dimensions: null,
+            distribution_rationale: null,
+            defensibility_rationale: null,
+          },
+        },
+        {
+          operation_index: 1,
+          operation_id: opportunityOperationId,
+          candidate: {
+            op: "ADD_NODE",
+            operation_id: opportunityOperationId,
+            node: {
+              client_generated_id: "opportunity-node",
+              kind: "opportunity",
+              title: "Automate evidence review",
+            },
+          },
+          dependency_operation_ids: [evidenceOperationId],
+          dependency_operation_indices: [0],
+          missing_dependency_operation_ids: [],
+          review: {
+            change_type: "addition",
+            entity_type: "node",
+            semantic_role: "opportunity",
+            title: "Automate evidence review",
+            provenance_node_ids: ["source-node"],
+            assumptions: [{ statement: "Teams repeat this workflow" }],
+            risks: [{ statement: "Evidence may be sparse" }],
+            contradiction: "One interview disagreed",
+            quality_dimensions: {
+              evidence_strength: {
+                rating: "strong",
+                rationale: "Multiple independent interviews.",
+              },
+              novelty: {
+                rating: "medium",
+                rationale: "Existing tools do not preserve provenance.",
+              },
+              builder_fit: {
+                rating: "strong",
+                rationale: "Matches the builder's graph experience.",
+              },
+              technical_feasibility: {
+                rating: "strong",
+                rationale: "The required primitives already exist.",
+              },
+              distribution_clarity: {
+                rating: "medium",
+                rationale: "Reach teams through research communities.",
+              },
+              operational_burden: {
+                rating: "low",
+                rationale: "No managed service is required.",
+              },
+            },
+            distribution_rationale: "Start with research operations teams.",
+            defensibility_rationale: "Decision provenance compounds over time.",
+          },
+        },
+      ],
+      regeneration_target_ids: [],
+      permitted_stale_resolution_ids: [],
+      client_id_map: {},
+      decisions: [],
+      regenerated_by_run_id: null,
+      created_at: "2026-07-15T12:00:00+00:00",
+      decided_at: null,
+      applied_at: null,
+    };
+
+    fireEvent.click(screen.getByRole("button", { name: "Review patch" }));
+    fetchMock.mockResolvedValueOnce(response({ patch }));
+    fireEvent.change(screen.getByLabelText("Patch ID"), {
+      target: { value: patch.patch_id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load patch" }));
+
+    expect(await screen.findByText("Evidence strength")).toBeVisible();
+    for (const label of [
+      "Novelty",
+      "Builder fit",
+      "Technical feasibility",
+      "Distribution clarity",
+      "Operational burden",
+      "Distribution rationale",
+      "Defensibility rationale",
+    ]) {
+      expect(screen.getByText(label)).toBeVisible();
+    }
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Interview notes/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Deselect dependent operations first",
+    );
+    expect(
+      screen.getByRole("checkbox", { name: /Interview notes/i }),
+    ).toBeChecked();
+
+    const appliedPatch: GraphPatch = {
+      ...patch,
+      status: "applied",
+      decided_at: "2026-07-15T12:01:00+00:00",
+      applied_at: "2026-07-15T12:01:00+00:00",
+    };
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          patch: appliedPatch,
+          canvas_revision: 2,
+          client_id_map: {},
+          conflicts: [],
+        }),
+      )
+      .mockResolvedValueOnce(response({ canvas: { ...graph, revision: 2 } }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Apply nonconflicting" }),
+    );
+
+    expect(
+      await screen.findByText("Patch decisions committed to the canvas."),
+    ).toBeVisible();
+    const applyRequest = fetchMock.mock.calls.find(
+      (call) => call[0] === `/api/graph-patches/${patch.patch_id}/apply`,
+    );
+    expect(applyRequest).toBeDefined();
+    expect(JSON.parse(String((applyRequest?.[1] as RequestInit).body))).toEqual(
+      {
+        selected_operation_ids: [evidenceOperationId, opportunityOperationId],
+        apply_nonconflicting_only: true,
+      },
+    );
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/canvases/${CANVAS_ID}`,
+        expect.anything(),
+      ),
+    );
   });
 
   it("reports an unavailable runtime without crashing", async () => {

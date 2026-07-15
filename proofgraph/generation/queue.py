@@ -12,7 +12,7 @@ from django.db.models.functions import Now
 
 from proofgraph.generation.events import append_event_locked
 from proofgraph.generation.models import GenerationEventType, GenerationRun, RunStatus
-from proofgraph.generation.telemetry import emit_telemetry
+from proofgraph.generation.telemetry import emit_patch_regeneration_terminal, emit_telemetry
 
 
 class LeaseLostError(RuntimeError):
@@ -83,6 +83,11 @@ def terminalize_exhausted_runs() -> int:
             )
             terminalized += 1
             emit_telemetry("run.poisoned", run_id=run.id, attempt=run.attempt)
+            emit_patch_regeneration_terminal(
+                run_id=run.id,
+                canvas_id=run.canvas_id,
+                status=RunStatus.FAILED,
+            )
     return terminalized
 
 
@@ -164,6 +169,11 @@ def finalize_expired_patch_ready_runs() -> int:
             run_id=run.id,
             patch_id=patch_id,
             lease_epoch=recovery_lease.lease_epoch,
+        )
+        emit_patch_regeneration_terminal(
+            run_id=run.id,
+            canvas_id=run.canvas_id,
+            status=RunStatus.COMPLETED,
         )
     return completed
 

@@ -10,8 +10,20 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 from pydantic import ValidationError
 
+from proofgraph.generation.patch_application import apply_graph_patch
+from proofgraph.generation.patches import (
+    get_graph_patch,
+    regenerate_graph_patch,
+    reject_graph_patch,
+    serialize_graph_patch,
+)
 from proofgraph.generation.retention import RetentionPolicyError
-from proofgraph.generation.schemas import GenerationRunRequest, SourceIngestionEnvelope
+from proofgraph.generation.schemas import (
+    GenerationRunRequest,
+    PatchApplyRequest,
+    PatchRegenerationRequest,
+    SourceIngestionEnvelope,
+)
 from proofgraph.generation.services import (
     cancel_generation_run,
     create_generation_run,
@@ -132,6 +144,61 @@ def generation_run_cancel(_request: HttpRequest, run_id: uuid.UUID) -> JsonRespo
 @_api_errors
 def generation_run_retry(_request: HttpRequest, run_id: uuid.UUID) -> JsonResponse:
     result = retry_generation_run(run_id)
+    return JsonResponse(result.payload, status=result.status)
+
+
+@require_http_methods(["GET"])
+@_api_errors
+def graph_patch_detail(_request: HttpRequest, patch_id: uuid.UUID) -> JsonResponse:
+    return JsonResponse({"patch": serialize_graph_patch(get_graph_patch(patch_id))})
+
+
+@require_http_methods(["POST"])
+@_api_errors
+def graph_patch_reject(request: HttpRequest, patch_id: uuid.UUID) -> JsonResponse:
+    payload = _json_object(request)
+    if payload:
+        raise GraphAPIError(
+            status=422,
+            code="invalid_patch_rejection_request",
+            message="Patch rejection does not accept request fields.",
+            details={"fields": sorted(payload)},
+        )
+    result = reject_graph_patch(patch_id)
+    return JsonResponse(result.payload, status=result.status)
+
+
+@require_http_methods(["POST"])
+@_api_errors
+def graph_patch_apply(request: HttpRequest, patch_id: uuid.UUID) -> JsonResponse:
+    payload = _json_object(request)
+    try:
+        envelope = PatchApplyRequest.model_validate_json(json.dumps(payload))
+    except ValidationError as error:
+        raise GraphAPIError(
+            status=422,
+            code="invalid_patch_apply_request",
+            message="The patch-apply request is invalid.",
+            details={"validation": json.loads(error.json(include_url=False))},
+        ) from error
+    result = apply_graph_patch(patch_id, envelope)
+    return JsonResponse(result.payload, status=result.status)
+
+
+@require_http_methods(["POST"])
+@_api_errors
+def graph_patch_regenerate(request: HttpRequest, patch_id: uuid.UUID) -> JsonResponse:
+    payload = _json_object(request)
+    try:
+        envelope = PatchRegenerationRequest.model_validate_json(json.dumps(payload))
+    except ValidationError as error:
+        raise GraphAPIError(
+            status=422,
+            code="invalid_patch_regeneration_request",
+            message="The patch-regeneration request is invalid.",
+            details={"validation": json.loads(error.json(include_url=False))},
+        ) from error
+    result = regenerate_graph_patch(patch_id, envelope)
     return JsonResponse(result.payload, status=result.status)
 
 

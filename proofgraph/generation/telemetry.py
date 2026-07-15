@@ -34,3 +34,26 @@ def emit_telemetry(name: str, **dimensions: Any) -> None:
             default=str,
         )
     )
+
+
+def emit_patch_regeneration_terminal(
+    *,
+    run_id: Any,
+    canvas_id: Any,
+    status: str,
+) -> None:
+    from proofgraph.generation.models import GraphPatch
+
+    original_patch = (
+        GraphPatch.objects.filter(regenerated_by_run_id=run_id).values("id", "run_id").first()
+    )
+    if original_patch is None:
+        return
+    emit_telemetry(
+        "patch.regeneration_terminal",
+        patch_id=original_patch["id"],
+        original_run_id=original_patch["run_id"],
+        run_id=run_id,
+        canvas_id=canvas_id,
+        status=status,
+    )

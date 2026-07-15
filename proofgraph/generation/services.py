@@ -18,7 +18,7 @@ from proofgraph.generation.models import (
     RunStatus,
 )
 from proofgraph.generation.schemas import GenerationRunRequest
-from proofgraph.generation.telemetry import emit_telemetry
+from proofgraph.generation.telemetry import emit_patch_regeneration_terminal, emit_telemetry
 from proofgraph.graph.exceptions import GraphAPIError
 from proofgraph.graph.models import Canvas, Node
 
@@ -29,7 +29,7 @@ class ServiceResult:
     status: int
 
 
-def _request_fingerprint(request: GenerationRunRequest) -> str:
+def generation_request_fingerprint(request: GenerationRunRequest) -> str:
     semantic = request.model_dump(mode="json", exclude={"idempotency_key"})
     semantic["selected_node_ids"] = sorted(semantic["selected_node_ids"])
     semantic["expected_node_versions"] = dict(sorted(semantic["expected_node_versions"].items()))
@@ -49,7 +49,7 @@ def create_generation_run(
     request: GenerationRunRequest,
 ) -> ServiceResult:
     composition = get_composition()
-    fingerprint = _request_fingerprint(request)
+    fingerprint = generation_request_fingerprint(request)
 
     with transaction.atomic():
         canvas = Canvas.objects.select_for_update().filter(pk=canvas_id).first()
@@ -183,6 +183,12 @@ def cancel_generation_run(run_id: uuid.UUID) -> ServiceResult:
                 details={"status": run.status},
             )
     emit_telemetry("run.cancel_requested", run_id=run.id, status=run.status)
+    if run.status == RunStatus.CANCELLED:
+        emit_patch_regeneration_terminal(
+            run_id=run.id,
+            canvas_id=run.canvas_id,
+            status=RunStatus.CANCELLED,
+        )
     return result
 
 

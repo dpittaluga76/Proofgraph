@@ -46,6 +46,38 @@ class GenerationRunRequest(StrictModel):
         return self
 
 
+class PatchRegenerationRequest(StrictModel):
+    instruction: str = Field(min_length=1, max_length=4_000)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def normalize_fields(self) -> PatchRegenerationRequest:
+        self.instruction = self.instruction.strip()
+        self.idempotency_key = self.idempotency_key.strip()
+        if not self.instruction:
+            raise ValueError("instruction must not be blank")
+        if not self.idempotency_key:
+            raise ValueError("idempotency_key must not be blank")
+        return self
+
+
+class PatchApplyRequest(StrictModel):
+    selected_operation_ids: list[str] | None = None
+    apply_nonconflicting_only: bool = False
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> PatchApplyRequest:
+        if self.selected_operation_ids is None:
+            return self
+        normalized = [value.strip() for value in self.selected_operation_ids]
+        if not normalized or any(not value or len(value) > 200 for value in normalized):
+            raise ValueError("selected_operation_ids must contain non-empty operation IDs")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("selected_operation_ids must not contain duplicates")
+        self.selected_operation_ids = normalized
+        return self
+
+
 class SourceIngestionEnvelope(StrictModel):
     operation_key: str = Field(min_length=1, max_length=200)
     url: str | None = Field(default=None, min_length=1, max_length=2_048)

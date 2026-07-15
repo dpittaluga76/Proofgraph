@@ -5,6 +5,10 @@ from proofgraph.generation.api import (
     generation_run_collection,
     generation_run_detail,
     generation_run_retry,
+    graph_patch_apply,
+    graph_patch_detail,
+    graph_patch_regenerate,
+    graph_patch_reject,
     source_collection,
     source_detail,
     source_ingestion_detail,
@@ -46,6 +50,26 @@ urlpatterns = [
         "api/generation-runs/<uuid:run_id>/retry",
         generation_run_retry,
         name="generation-run-retry",
+    ),
+    path(
+        "api/graph-patches/<uuid:patch_id>",
+        graph_patch_detail,
+        name="graph-patch-detail",
+    ),
+    path(
+        "api/graph-patches/<uuid:patch_id>/reject",
+        graph_patch_reject,
+        name="graph-patch-reject",
+    ),
+    path(
+        "api/graph-patches/<uuid:patch_id>/apply",
+        graph_patch_apply,
+        name="graph-patch-apply",
+    ),
+    path(
+        "api/graph-patches/<uuid:patch_id>/regenerate",
+        graph_patch_regenerate,
+        name="graph-patch-regenerate",
     ),
     path(
         "api/source-ingestions/<uuid:ingestion_id>",

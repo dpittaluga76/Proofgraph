@@ -13,6 +13,75 @@ export type DependencyConflictDetails = {
   referencing_constraints: Array<{ id: string; version: number }>;
 };
 
+export type PatchDecision = {
+  decision_id: string;
+  operation_index: number;
+  decision: "accepted" | "rejected" | "skipped_conflict";
+  reason: string | null;
+  actor_type: string;
+  actor_id: string | null;
+  graph_operation_id: string | null;
+  decided_at: string;
+};
+
+export type QualityDimension = {
+  rating: string;
+  rationale: string;
+};
+
+export type PatchOperationReview = {
+  change_type: "addition" | "update" | "deletion" | "position";
+  entity_type: "node" | "edge";
+  semantic_role: string | null;
+  title: string | null;
+  provenance_node_ids: string[];
+  assumptions: Array<Record<string, unknown>>;
+  risks: Array<Record<string, unknown>>;
+  contradiction: unknown;
+  quality_dimensions: Record<string, QualityDimension> | null;
+  distribution_rationale: unknown;
+  defensibility_rationale: unknown;
+};
+
+export type PatchOperationCandidate = {
+  operation_index: number;
+  operation_id: string;
+  candidate: Record<string, unknown>;
+  dependency_operation_ids: string[];
+  dependency_operation_indices: number[];
+  missing_dependency_operation_ids: string[];
+  review: PatchOperationReview;
+};
+
+export type GraphPatch = {
+  patch_id: string;
+  run_id: string;
+  canvas_id: string;
+  base_canvas_revision: number;
+  status: "pending" | "applied" | "partially_applied" | "rejected";
+  operations: PatchOperationCandidate[];
+  regeneration_target_ids: string[];
+  permitted_stale_resolution_ids: string[];
+  client_id_map: Record<string, string>;
+  decisions: PatchDecision[];
+  regenerated_by_run_id: string | null;
+  created_at: string;
+  decided_at: string | null;
+  applied_at: string | null;
+};
+
+export type PatchApplyResult = {
+  patch: GraphPatch;
+  canvas_revision: number;
+  client_id_map: Record<string, string>;
+  conflicts: Array<{
+    operation_id: string;
+    code: string;
+    message: string;
+    details: unknown;
+  }>;
+};
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -108,6 +177,55 @@ export async function renameCanvas(
     { method: "PATCH", body: JSON.stringify({ title }) },
   );
   return response.canvas;
+}
+
+export async function getGraphPatch(patchId: string): Promise<GraphPatch> {
+  const response = await request<{ patch: GraphPatch }>(
+    `/api/graph-patches/${encodeURIComponent(patchId)}`,
+  );
+  return response.patch;
+}
+
+export async function rejectGraphPatch(patchId: string): Promise<GraphPatch> {
+  const response = await request<{ patch: GraphPatch }>(
+    `/api/graph-patches/${encodeURIComponent(patchId)}/reject`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  return response.patch;
+}
+
+export async function applyGraphPatch(
+  patchId: string,
+  selectedOperationIds: string[] | null,
+  applyNonconflictingOnly = false,
+): Promise<PatchApplyResult> {
+  return request<PatchApplyResult>(
+    `/api/graph-patches/${encodeURIComponent(patchId)}/apply`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        selected_operation_ids: selectedOperationIds,
+        apply_nonconflicting_only: applyNonconflictingOnly,
+      }),
+    },
+  );
+}
+
+export async function regenerateGraphPatch(
+  patchId: string,
+  instruction: string,
+  idempotencyKey: string,
+): Promise<{ patch: GraphPatch; regeneration_run: { run_id: string } }> {
+  return request<{
+    patch: GraphPatch;
+    regeneration_run: { run_id: string };
+  }>(`/api/graph-patches/${encodeURIComponent(patchId)}/regenerate`, {
+    method: "POST",
+    body: JSON.stringify({
+      instruction,
+      idempotency_key: idempotencyKey,
+    }),
+  });
 }
 
 export type GraphOperation = Record<string, unknown> & {

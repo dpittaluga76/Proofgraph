@@ -9,6 +9,7 @@ import {
 
 import {
   ApiError,
+  applyGraphPatch,
   applyOperation,
   checkRuntime,
   createCanvas,
@@ -17,8 +18,12 @@ import {
   type DependencyConflictDetails,
   type EdgeOperationResult,
   getCanvas,
+  getGraphPatch,
+  type GraphPatch,
   type NodeOperationResult,
   operationKey,
+  regenerateGraphPatch,
+  rejectGraphPatch,
   renameCanvas,
 } from "./api";
 import {
@@ -148,6 +153,7 @@ export function App() {
   const [deleteConflict, setDeleteConflict] = useState<DeleteConflict | null>(
     null,
   );
+  const [patchReviewOpen, setPatchReviewOpen] = useState(false);
   const [recentCanvasId, setRecentCanvasId] = useState<string | null>(() => {
     try {
       return localStorage.getItem("proofgraph.recentCanvasId");
@@ -726,6 +732,13 @@ export function App() {
         </button>
         <button
           type="button"
+          className="toolbar-button"
+          onClick={() => setPatchReviewOpen(true)}
+        >
+          Review patch
+        </button>
+        <button
+          type="button"
           className="toolbar-button toolbar-button--end"
           onClick={() => {
             setCanvas(null);
@@ -872,6 +885,13 @@ export function App() {
           disabled={busy !== null}
           onClose={() => setDialog(null)}
           onSubmit={(input) => void handleAddEdge(input)}
+        />
+      )}
+      {patchReviewOpen && (
+        <PatchReviewDialog
+          canvasId={canvas.id}
+          onClose={() => setPatchReviewOpen(false)}
+          onApplied={() => void refreshCurrentCanvas()}
         />
       )}
       {deleteConflict && (
@@ -1567,14 +1587,506 @@ function DeleteConflictDialog({
   );
 }
 
+const OPPORTUNITY_DIMENSIONS = [
+  ["evidence_strength", "Evidence strength"],
+  ["novelty", "Novelty"],
+  ["builder_fit", "Builder fit"],
+  ["technical_feasibility", "Technical feasibility"],
+  ["distribution_clarity", "Distribution clarity"],
+  ["operational_burden", "Operational burden"],
+] as const;
+
+function displayValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  return JSON.stringify(value);
+}
+
+function PatchReviewDialog({
+  canvasId,
+  onClose,
+  onApplied,
+}: {
+  canvasId: string;
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  const [patch, setPatch] = useState<GraphPatch | null>(null);
+  const [selectedOperationIds, setSelectedOperationIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [message, setMessage] = useState<Notice>(null);
+  const [revisionFeedback, setRevisionFeedback] = useState("");
+  const [linkedRunId, setLinkedRunId] = useState<string | null>(null);
+  const regenerationKey = useRef<string | null>(null);
+
+  const operationById = useMemo(
+    () =>
+      new Map(
+        (patch?.operations ?? []).map((operation) => [
+          operation.operation_id,
+          operation,
+        ]),
+      ),
+    [patch],
+  );
+  const decisionsByIndex = useMemo(
+    () =>
+      new Map(
+        (patch?.decisions ?? []).map((decision) => [
+          decision.operation_index,
+          decision,
+        ]),
+      ),
+    [patch],
+  );
+
+  async function loadPatch(patchId: string) {
+    setBusyAction("load");
+    setMessage(null);
+    try {
+      const loaded = await getGraphPatch(patchId);
+      if (loaded.canvas_id !== canvasId) {
+        throw new Error("This patch belongs to a different canvas.");
+      }
+      setPatch(loaded);
+      setSelectedOperationIds(
+        new Set(loaded.operations.map((operation) => operation.operation_id)),
+      );
+      setLinkedRunId(loaded.regenerated_by_run_id);
+    } catch (error) {
+      setMessage({ tone: "error", message: errorMessage(error) });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function toggleOperation(operationId: string, checked: boolean) {
+    if (!patch || patch.status !== "pending") return;
+    setMessage(null);
+    if (checked) {
+      const next = new Set(selectedOperationIds);
+      const include = (candidateId: string) => {
+        if (next.has(candidateId)) return;
+        const candidate = operationById.get(candidateId);
+        candidate?.dependency_operation_ids.forEach(include);
+        next.add(candidateId);
+      };
+      include(operationId);
+      setSelectedOperationIds(next);
+      return;
+    }
+
+    const blocking = patch.operations.filter(
+      (candidate) =>
+        selectedOperationIds.has(candidate.operation_id) &&
+        candidate.dependency_operation_ids.includes(operationId),
+    );
+    if (blocking.length > 0) {
+      setMessage({
+        tone: "error",
+        message: `Deselect dependent operations first: ${blocking
+          .map((candidate) => candidate.review.title ?? candidate.operation_id)
+          .join(", ")}.`,
+      });
+      return;
+    }
+    const next = new Set(selectedOperationIds);
+    next.delete(operationId);
+    setSelectedOperationIds(next);
+  }
+
+  async function applySelection(
+    selectedIds: string[] | null,
+    nonconflictingOnly: boolean,
+  ) {
+    if (!patch) return;
+    setBusyAction(nonconflictingOnly ? "apply-safe" : "apply");
+    setMessage(null);
+    try {
+      const result = await applyGraphPatch(
+        patch.patch_id,
+        selectedIds,
+        nonconflictingOnly,
+      );
+      setPatch(result.patch);
+      setMessage({
+        tone: "success",
+        message:
+          result.conflicts.length > 0
+            ? `Applied the nonconflicting selection; ${result.conflicts.length} operation${result.conflicts.length === 1 ? " was" : "s were"} skipped.`
+            : "Patch decisions committed to the canvas.",
+      });
+      onApplied();
+    } catch (error) {
+      setMessage({ tone: "error", message: errorMessage(error) });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function rejectAll() {
+    if (!patch) return;
+    setBusyAction("reject");
+    setMessage(null);
+    try {
+      const rejected = await rejectGraphPatch(patch.patch_id);
+      setPatch(rejected);
+      setMessage({
+        tone: "success",
+        message:
+          "Every candidate operation was rejected without changing the canvas.",
+      });
+    } catch (error) {
+      setMessage({ tone: "error", message: errorMessage(error) });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function requestRegeneration() {
+    if (!patch || !revisionFeedback.trim()) return;
+    setBusyAction("regenerate");
+    setMessage(null);
+    const key = regenerationKey.current ?? operationKey();
+    regenerationKey.current = key;
+    try {
+      const result = await regenerateGraphPatch(
+        patch.patch_id,
+        revisionFeedback.trim(),
+        key,
+      );
+      regenerationKey.current = null;
+      setPatch(result.patch);
+      setLinkedRunId(result.regeneration_run.run_id);
+      setMessage({
+        tone: "success",
+        message:
+          "The original patch was rejected and one revised run was queued.",
+      });
+    } catch (error) {
+      setMessage({ tone: "error", message: errorMessage(error) });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  const selectedIds = patch?.operations
+    .filter((operation) => selectedOperationIds.has(operation.operation_id))
+    .map((operation) => operation.operation_id);
+  const pending = patch?.status === "pending";
+
+  return (
+    <Modal title="Review generated graph patch" onClose={onClose} wide>
+      <form
+        className="patch-loader"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const patchId = String(
+            new FormData(event.currentTarget).get("patchId") ?? "",
+          ).trim();
+          if (patchId) void loadPatch(patchId);
+        }}
+      >
+        <label htmlFor="patch-review-id">Patch ID</label>
+        <div className="patch-loader__row">
+          <input
+            id="patch-review-id"
+            name="patchId"
+            defaultValue={patch?.patch_id ?? ""}
+            placeholder="Paste a ready patch ID"
+            required
+            autoFocus
+          />
+          <button
+            type="submit"
+            className="secondary-button"
+            disabled={busyAction !== null}
+          >
+            Load patch
+          </button>
+        </div>
+      </form>
+
+      {message && (
+        <div
+          className={`notice notice--${message.tone}`}
+          role={message.tone === "error" ? "alert" : "status"}
+        >
+          {message.message}
+        </div>
+      )}
+
+      {patch && (
+        <div className="patch-review">
+          <div className="patch-summary">
+            <div>
+              <span className={`patch-status patch-status--${patch.status}`}>
+                {patch.status.replace("_", " ")}
+              </span>
+              <strong>{patch.operations.length} candidate operations</strong>
+            </div>
+            <p>
+              Built from canvas revision {patch.base_canvas_revision}. Current
+              conflicts are checked against touched entity versions, not the
+              whole-canvas revision.
+            </p>
+            {patch.regenerated_by_run_id && (
+              <p className="field-hint">
+                Revised run: <code>{patch.regenerated_by_run_id}</code>
+              </p>
+            )}
+          </div>
+
+          <div className="patch-operation-list">
+            {patch.operations.map((operation) => {
+              const decision = decisionsByIndex.get(operation.operation_index);
+              const dimensions = operation.review.quality_dimensions;
+              return (
+                <article
+                  className={`patch-operation patch-operation--${operation.review.change_type}`}
+                  key={operation.operation_id}
+                >
+                  <header>
+                    <label className="patch-operation__selection">
+                      <input
+                        type="checkbox"
+                        checked={selectedOperationIds.has(
+                          operation.operation_id,
+                        )}
+                        disabled={!pending || busyAction !== null}
+                        onChange={(event) =>
+                          toggleOperation(
+                            operation.operation_id,
+                            event.target.checked,
+                          )
+                        }
+                      />
+                      <span>
+                        <small>
+                          {operation.review.change_type} ·{" "}
+                          {operation.review.entity_type}
+                        </small>
+                        <strong>
+                          {operation.review.title ?? operation.operation_id}
+                        </strong>
+                      </span>
+                    </label>
+                    <span className="semantic-role">
+                      {operation.review.semantic_role ?? "graph item"}
+                    </span>
+                  </header>
+
+                  {operation.dependency_operation_ids.length > 0 && (
+                    <div className="patch-dependencies">
+                      <span>Requires</span>
+                      {operation.dependency_operation_ids.map(
+                        (dependencyId) => (
+                          <code key={dependencyId}>{dependencyId}</code>
+                        ),
+                      )}
+                    </div>
+                  )}
+                  {decision && (
+                    <p
+                      className={`patch-decision patch-decision--${decision.decision}`}
+                    >
+                      {decision.decision.replace("_", " ")}
+                      {decision.reason ? ` · ${decision.reason}` : ""}
+                    </p>
+                  )}
+                  {operation.review.provenance_node_ids.length > 0 && (
+                    <div className="patch-provenance">
+                      <span>Provenance</span>
+                      {operation.review.provenance_node_ids.map((nodeId) => (
+                        <code key={nodeId}>{nodeId}</code>
+                      ))}
+                    </div>
+                  )}
+
+                  {dimensions && (
+                    <div
+                      className="quality-grid"
+                      aria-label="Opportunity quality dimensions"
+                    >
+                      {OPPORTUNITY_DIMENSIONS.map(([key, label]) => {
+                        const assessment = dimensions[key];
+                        return assessment ? (
+                          <section key={key}>
+                            <span>{label}</span>
+                            <strong>{assessment.rating}</strong>
+                            <p>{assessment.rationale}</p>
+                          </section>
+                        ) : null;
+                      })}
+                    </div>
+                  )}
+                  {Boolean(
+                    operation.review.distribution_rationale ||
+                    operation.review.defensibility_rationale,
+                  ) && (
+                    <div className="rationale-grid">
+                      <section>
+                        <span>Distribution rationale</span>
+                        <p>
+                          {displayValue(
+                            operation.review.distribution_rationale,
+                          )}
+                        </p>
+                      </section>
+                      <section>
+                        <span>Defensibility rationale</span>
+                        <p>
+                          {displayValue(
+                            operation.review.defensibility_rationale,
+                          )}
+                        </p>
+                      </section>
+                    </div>
+                  )}
+                  {Boolean(
+                    operation.review.assumptions.length > 0 ||
+                    operation.review.risks.length > 0 ||
+                    operation.review.contradiction,
+                  ) && (
+                    <div className="review-signals">
+                      {operation.review.assumptions.length > 0 && (
+                        <section>
+                          <span>Assumptions</span>
+                          <ul>
+                            {operation.review.assumptions.map((item, index) => (
+                              <li key={index}>
+                                {displayValue(item.statement ?? item)}
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      )}
+                      {operation.review.risks.length > 0 && (
+                        <section>
+                          <span>Risks</span>
+                          <ul>
+                            {operation.review.risks.map((item, index) => (
+                              <li key={index}>
+                                {displayValue(item.statement ?? item)}
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      )}
+                      {Boolean(operation.review.contradiction) && (
+                        <section>
+                          <span>Contradiction</span>
+                          <p>{displayValue(operation.review.contradiction)}</p>
+                        </section>
+                      )}
+                    </div>
+                  )}
+                  <details className="candidate-json">
+                    <summary>Immutable candidate payload</summary>
+                    <pre>{JSON.stringify(operation.candidate, null, 2)}</pre>
+                  </details>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="patch-actions">
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!pending || busyAction !== null}
+              onClick={() => void applySelection(null, false)}
+            >
+              Accept all
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={
+                !pending ||
+                busyAction !== null ||
+                !selectedIds ||
+                selectedIds.length === 0
+              }
+              onClick={() => void applySelection(selectedIds ?? [], false)}
+            >
+              Apply selected ({selectedIds?.length ?? 0})
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={
+                !pending ||
+                busyAction !== null ||
+                !selectedIds ||
+                selectedIds.length === 0
+              }
+              onClick={() => void applySelection(selectedIds ?? [], true)}
+            >
+              Apply nonconflicting
+            </button>
+            <button
+              type="button"
+              className="danger-button"
+              disabled={!pending || busyAction !== null}
+              onClick={() => void rejectAll()}
+            >
+              Reject all
+            </button>
+          </div>
+
+          <form
+            className="patch-regeneration"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void requestRegeneration();
+            }}
+          >
+            <label htmlFor="patch-revision-feedback">Revision feedback</label>
+            <textarea
+              id="patch-revision-feedback"
+              rows={3}
+              value={revisionFeedback}
+              placeholder="Explain what the revised candidate should change."
+              disabled={!pending || busyAction !== null}
+              onChange={(event) => {
+                regenerationKey.current = null;
+                setRevisionFeedback(event.target.value);
+              }}
+            />
+            <button
+              type="submit"
+              className="secondary-button"
+              disabled={
+                !pending || busyAction !== null || !revisionFeedback.trim()
+              }
+            >
+              Request regeneration
+            </button>
+            {linkedRunId && (
+              <p className="field-hint">
+                Linked run <code>{linkedRunId}</code>
+              </p>
+            )}
+          </form>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function Modal({
   title,
   onClose,
   children,
+  wide = false,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  wide?: boolean;
 }) {
   return (
     <div
@@ -1585,7 +2097,7 @@ function Modal({
       }}
     >
       <section
-        className="modal"
+        className={`modal${wide ? " modal--wide" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"

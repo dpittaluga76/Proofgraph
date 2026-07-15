@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { applyOperation, createCanvas } from "./api";
+import {
+  applyGraphPatch,
+  applyOperation,
+  createCanvas,
+  getGraphPatch,
+  regenerateGraphPatch,
+  rejectGraphPatch,
+} from "./api";
 import type { GraphCanvas } from "./graph";
 
 afterEach(() => {
@@ -101,4 +108,60 @@ describe("API client", () => {
     ) as { operation_key: string };
     expect(replayBody.operation_key).toBe(original.operation_key);
   });
+
+  it("uses the patch review endpoints and preserves explicit apply semantics", async () => {
+    const patchId = "patch/with spaces";
+    const patch = { patch_id: patchId };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response({ patch }))
+      .mockResolvedValueOnce(response({ patch }))
+      .mockResolvedValueOnce(
+        response({
+          patch,
+          canvas_revision: 7,
+          client_id_map: {},
+          conflicts: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          patch,
+          regeneration_run: { run_id: "run-id" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getGraphPatch(patchId);
+    await rejectGraphPatch(patchId);
+    await applyGraphPatch(patchId, ["op-a", "op-b"], true);
+    await regenerateGraphPatch(patchId, "Strengthen the evidence", "retry-key");
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/graph-patches/patch%2Fwith%20spaces",
+      "/api/graph-patches/patch%2Fwith%20spaces/reject",
+      "/api/graph-patches/patch%2Fwith%20spaces/apply",
+      "/api/graph-patches/patch%2Fwith%20spaces/regenerate",
+    ]);
+    expect(
+      JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body)),
+    ).toEqual({
+      selected_operation_ids: ["op-a", "op-b"],
+      apply_nonconflicting_only: true,
+    });
+    expect(
+      JSON.parse(String((fetchMock.mock.calls[3]?.[1] as RequestInit).body)),
+    ).toEqual({
+      instruction: "Strengthen the evidence",
+      idempotency_key: "retry-key",
+    });
+  });
 });
+
+function response(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  } as Response;
+}
