@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -13,6 +14,42 @@ import type { GraphPatch } from "./api";
 import type { GraphCanvas, GraphEdge, GraphNode, NodeKind } from "./graph";
 
 const CANVAS_ID = "11111111-1111-4111-8111-111111111111";
+
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+
+  readonly url: string;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+  private listeners = new Map<
+    string,
+    Array<(event: MessageEvent<string>) => void>
+  >();
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(
+    type: string,
+    listener: (event: MessageEvent<string>) => void,
+  ) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+
+  close() {
+    this.closed = true;
+  }
+
+  emit(type: string, payload: unknown) {
+    const event = new MessageEvent<string>(type, {
+      data: JSON.stringify(payload),
+    });
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
 
 function node(
   id: string,
@@ -107,10 +144,76 @@ async function openCanvas(
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  window.history.pushState({}, "", "/");
+  FakeEventSource.instances = [];
   vi.unstubAllGlobals();
 });
 
 describe("App", () => {
+  it("opens the isolated seeded demo and resets only through the demo endpoint", async () => {
+    window.history.pushState({}, "", "/?demo=1");
+    const seeded = {
+      ...canvas([
+        node(
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "goal",
+          "Reduce security questionnaire work",
+        ),
+      ]),
+      title: "Security questionnaire opportunity",
+    };
+    const resetCanvas = {
+      ...seeded,
+      id: "22222222-2222-4222-8222-222222222222",
+      revision: 0,
+      nodes: [],
+    };
+    const session = {
+      expires_at: "2026-07-16T12:00:00Z",
+      hybrid_run_count: 3,
+      hybrid_run_limit: 12,
+      primary_profile: "demo_hybrid_v1",
+      fallback_profile: "replay_v1",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({ status: "ok", database: "ok", demo_mode: false }),
+      )
+      .mockResolvedValueOnce(response({ session, canvas: seeded }))
+      .mockResolvedValueOnce(
+        response({
+          session: { ...session, hybrid_run_count: 3 },
+          canvas: resetCanvas,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(
+      await screen.findByDisplayValue("Security questionnaire opportunity"),
+    ).toBeVisible();
+    expect(screen.getByText("Hybrid 3/12")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Open another canvas" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset demo" }));
+
+    expect(
+      await screen.findByText(
+        "Demo reset to a fresh isolated copy of the starting canvas.",
+      ),
+    ).toBeVisible();
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/health",
+      "/api/demo/bootstrap",
+      "/api/demo/reset",
+    ]);
+    expect(screen.getByDisplayValue(resetCanvas.title)).toBeVisible();
+  });
+
   it("creates a canvas and adds a goal through a localized operation", async () => {
     const fetchMock = readyFetch();
     const emptyCanvas = canvas();
@@ -484,6 +587,21 @@ describe("App", () => {
     });
   });
 
+  it("visually labels persisted cached evidence as previously retrieved", async () => {
+    const cachedSource = node(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "source",
+      "Cached source",
+      { metadata: { cache_hit: true, review_status: "accepted" } },
+    );
+    const fetchMock = readyFetch();
+    render(<App />);
+    await screen.findByText("Workspace ready");
+    await openCanvas(fetchMock, canvas([cachedSource]));
+
+    expect(screen.getByText("Previously retrieved")).toBeVisible();
+  });
+
   it("persists deterministic auto-layout as ordered position-only operations", async () => {
     const opportunity = node(
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -776,6 +894,385 @@ describe("App", () => {
         expect.anything(),
       ),
     );
+  });
+
+  it("keeps rejected evidence visible, focusable, audited, and excluded from generation", async () => {
+    const rejected = node(
+      "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "claim",
+      "Rejected claim",
+      {
+        metadata: {
+          review_status: "rejected",
+          rejected_by_operation_id: 42,
+        },
+      },
+    );
+    const fetchMock = readyFetch();
+    render(<App />);
+    await screen.findByText("Workspace ready");
+    await openCanvas(fetchMock, canvas([rejected]));
+
+    const card = screen.getByTestId(`node-${rejected.id}`);
+    expect(card).toHaveAttribute("tabindex", "0");
+    expect(card).toHaveAccessibleName(/Rejected evidence/);
+    expect(screen.getByText("Rejected evidence")).toBeVisible();
+    fireEvent.click(card);
+    expect(screen.getByText("Audit operation #42")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Reject accepted evidence" }),
+    ).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open generation controls" }),
+    );
+    fireEvent.change(screen.getByLabelText("Operation"), {
+      target: { value: "synthesize_opportunities" },
+    });
+    expect(
+      screen.getByRole("checkbox", { name: /Rejected claim/ }),
+    ).toBeDisabled();
+    expect(
+      screen.getAllByText("Rejected evidence is excluded from generation.")
+        .length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("enables branch comparison only for canonical parallel regeneration lineage", async () => {
+    const goal = node("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "goal", "Goal");
+    const canonicalStrategy = node(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "strategy",
+      "Canonical strategy",
+    );
+    const predecessor = node(
+      "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "strategy",
+      "Retained predecessor",
+      { stale: true, stale_since_revision: 4 },
+    );
+    const successor = node(
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "strategy",
+      "Parallel successor",
+      {
+        metadata: {
+          regenerated_from_node_id: predecessor.id,
+          lineage_mode: "parallel",
+          review_status: "accepted",
+        },
+      },
+    );
+    const graph = canvas(
+      [goal, canonicalStrategy, predecessor, successor],
+      [
+        edge(
+          "11111111-aaaa-4aaa-8aaa-111111111111",
+          goal.id,
+          canonicalStrategy.id,
+          {
+            kind: "evolves_into",
+          },
+        ),
+        edge(
+          "22222222-bbbb-4bbb-8bbb-222222222222",
+          predecessor.id,
+          successor.id,
+          {
+            kind: "evolves_into",
+          },
+        ),
+      ],
+    );
+    const fetchMock = readyFetch();
+    render(<App />);
+    await screen.findByText("Workspace ready");
+    await openCanvas(fetchMock, graph);
+
+    fireEvent.click(screen.getByTestId(`node-${goal.id}`));
+    expect(
+      screen.getByRole("button", { name: "Compare retained branches" }),
+    ).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId(`node-${predecessor.id}`));
+    const compare = screen.getByRole("button", {
+      name: "Compare retained branches",
+    });
+    expect(compare).toBeEnabled();
+    fireEvent.click(compare);
+    expect(
+      screen.getByRole("dialog", { name: "Compare retained branches" }),
+    ).toBeVisible();
+    const dialog = screen.getByRole("dialog", {
+      name: "Compare retained branches",
+    });
+    expect(within(dialog).getByText("Parallel successor")).toBeVisible();
+  });
+
+  it("reloads authoritative descendants when a semantic mutation reports staleness", async () => {
+    const goal = node("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "goal", "Goal");
+    const strategy = node(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "strategy",
+      "Dependent strategy",
+    );
+    const graph = canvas([goal, strategy]);
+    const fetchMock = readyFetch();
+    render(<App />);
+    await screen.findByText("Workspace ready");
+    await openCanvas(fetchMock, graph);
+    fireEvent.click(screen.getByTestId(`node-${goal.id}`));
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "Updated goal" },
+    });
+
+    fetchMock
+      .mockResolvedValueOnce(
+        response({
+          canvas_revision: 3,
+          node: { ...goal, title: "Updated goal", version: 2 },
+          stale_node_ids: [strategy.id],
+          newly_stale_node_ids: [strategy.id],
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          canvas: {
+            ...graph,
+            revision: 3,
+            nodes: [
+              { ...goal, title: "Updated goal", version: 2 },
+              { ...strategy, stale: true, stale_since_revision: 3 },
+            ],
+          },
+        }),
+      );
+    fireEvent.click(screen.getByRole("button", { name: "Save node" }));
+
+    expect(await screen.findByText("Needs regeneration")).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/canvases/${CANVAS_ID}`,
+      expect.anything(),
+    );
+  });
+
+  it("uses one cursor-replayed SSE stream, shows provisional overlays, and clears terminal loading", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const strategy = node(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "strategy",
+      "Accepted strategy",
+      { metadata: { review_status: "accepted" } },
+    );
+    const fetchMock = readyFetch();
+    render(<App />);
+    await screen.findByText("Workspace ready");
+    await openCanvas(fetchMock, canvas([strategy]));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(FakeEventSource.instances[0].url).toContain("events?after=0");
+
+    const stream = FakeEventSource.instances[0];
+    act(() => {
+      stream.emit("run.started", {
+        run_id: "run-a",
+        canvas_sequence: 1,
+        run_sequence: 1,
+        event_type: "run.started",
+        payload: { attempt: 1 },
+        timestamp: "2026-07-15T12:00:00Z",
+      });
+      stream.emit("research.source_found", {
+        run_id: "run-a",
+        canvas_sequence: 2,
+        run_sequence: 2,
+        event_type: "research.source_found",
+        payload: {
+          provisional: true,
+          source_id: "source-a",
+          url: "https://example.com/questionnaires",
+          sanitized_excerpt: "Previously validated evidence.",
+          cache_hit: true,
+        },
+        timestamp: "2026-07-15T12:00:01Z",
+      });
+      stream.emit("evidence.extracted", {
+        run_id: "run-a",
+        canvas_sequence: 3,
+        run_sequence: 3,
+        event_type: "evidence.extracted",
+        payload: {
+          provisional: true,
+          claim_id: "claim-a",
+          claim: "Questionnaires delay deals.",
+          classification: "observed",
+          strength: "strong",
+          source_ids: ["source-a"],
+        },
+        timestamp: "2026-07-15T12:00:01Z",
+      });
+    });
+
+    expect(await screen.findByText("Generation in progress")).toBeVisible();
+    expect(screen.getByText("Provisional evidence")).toBeVisible();
+    expect(screen.getByText("Questionnaires delay deals.")).toBeVisible();
+    expect(screen.getByText("Previously retrieved")).toBeVisible();
+
+    act(() => {
+      stream.emit("run.failed", {
+        run_id: "run-a",
+        canvas_sequence: 4,
+        run_sequence: 4,
+        event_type: "run.failed",
+        payload: {
+          code: "provider_timeout",
+          message: "Provider timed out.",
+          retryable: true,
+          stage: "extracting",
+        },
+        timestamp: "2026-07-15T12:00:02Z",
+      });
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Generation in progress"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Provider timed out/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry safely" })).toBeEnabled();
+
+    act(() => stream.onerror?.());
+    expect(stream.closed).toBe(true);
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2), {
+      timeout: 1_500,
+    });
+    expect(FakeEventSource.instances[1].url).toContain("events?after=4");
+  });
+
+  it("auto-opens only pending patch previews during durable SSE replay", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const fetchMock = readyFetch();
+    render(<App />);
+    await screen.findByText("Workspace ready");
+    await openCanvas(fetchMock, canvas());
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    const basePatch: GraphPatch = {
+      patch_id: "patch-old",
+      run_id: "run-old",
+      canvas_id: CANVAS_ID,
+      base_canvas_revision: 0,
+      status: "rejected",
+      operations: [],
+      regeneration_target_ids: [],
+      permitted_stale_resolution_ids: [],
+      client_id_map: {},
+      decisions: [],
+      regenerated_by_run_id: null,
+      created_at: "2026-07-15T12:00:00Z",
+      decided_at: "2026-07-15T12:01:00Z",
+      applied_at: null,
+    };
+    fetchMock.mockResolvedValueOnce(response({ patch: basePatch }));
+    act(() => {
+      FakeEventSource.instances[0].emit("patch.ready", {
+        run_id: "run-old",
+        canvas_sequence: 1,
+        run_sequence: 1,
+        event_type: "patch.ready",
+        payload: { patch_id: basePatch.patch_id },
+        timestamp: "2026-07-15T12:00:00Z",
+      });
+    });
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/graph-patches/patch-old",
+        expect.anything(),
+      ),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    const pendingPatch: GraphPatch = {
+      ...basePatch,
+      patch_id: "patch-current",
+      run_id: "run-current",
+      status: "pending",
+      decided_at: null,
+    };
+    fetchMock
+      .mockResolvedValueOnce(response({ patch: pendingPatch }))
+      .mockResolvedValueOnce(response({ patch: pendingPatch }));
+    act(() => {
+      FakeEventSource.instances[0].emit("patch.ready", {
+        run_id: "run-current",
+        canvas_sequence: 2,
+        run_sequence: 1,
+        event_type: "patch.ready",
+        payload: { patch_id: pendingPatch.patch_id },
+        timestamp: "2026-07-15T12:02:00Z",
+      });
+    });
+
+    expect(
+      await screen.findByRole("dialog", {
+        name: "Review generated graph patch",
+      }),
+    ).toBeVisible();
+    expect(await screen.findByText("0 candidate operations")).toBeVisible();
+  });
+
+  it("shows persisted opportunity quality and rationales after patch application", async () => {
+    const opportunity = node(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "opportunity",
+      "Approved-answer workspace",
+      {
+        metadata: {
+          review_status: "accepted",
+          dimensions: {
+            evidence_strength: {
+              rating: "strong",
+              rationale: "Independent evidence supports the problem.",
+            },
+            novelty: {
+              rating: "medium",
+              rationale: "A focused workflow wedge.",
+            },
+            builder_fit: { rating: "high", rationale: "Fits the team." },
+            technical_feasibility: {
+              rating: "high",
+              rationale: "Uses conventional components.",
+            },
+            distribution_clarity: {
+              rating: "medium",
+              rationale: "The buyer has focused communities.",
+            },
+            operational_burden: {
+              rating: "medium",
+              rationale: "Review remains necessary.",
+            },
+          },
+          distribution_rationale: "Security leaders have focused channels.",
+          defensibility: "Approved history and integrations compound.",
+        },
+      },
+    );
+    const fetchMock = readyFetch();
+    render(<App />);
+    await screen.findByText("Workspace ready");
+    await openCanvas(fetchMock, canvas([opportunity]));
+
+    fireEvent.click(screen.getByTestId(`node-${opportunity.id}`));
+
+    const quality = screen.getByRole("region", {
+      name: "Applied opportunity quality",
+    });
+    expect(within(quality).getByText("Evidence strength")).toBeVisible();
+    expect(within(quality).getByText("Operational burden")).toBeVisible();
+    expect(
+      within(quality).getByText("Security leaders have focused channels."),
+    ).toBeVisible();
+    expect(
+      within(quality).getByText("Approved history and integrations compound."),
+    ).toBeVisible();
   });
 
   it("reports an unavailable runtime without crashing", async () => {

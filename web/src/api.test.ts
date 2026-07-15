@@ -3,10 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyGraphPatch,
   applyOperation,
+  bootstrapDemo,
+  cancelGenerationRun,
   createCanvas,
+  createGenerationRun,
+  getGenerationRun,
   getGraphPatch,
   regenerateGraphPatch,
   rejectGraphPatch,
+  resetDemo,
+  retryGenerationRun,
 } from "./api";
 import type { GraphCanvas } from "./graph";
 
@@ -155,6 +161,99 @@ describe("API client", () => {
       instruction: "Strengthen the evidence",
       idempotency_key: "retry-key",
     });
+  });
+
+  it("uses the durable generation run, status, cancel, and retry contracts", async () => {
+    const canvasId = "canvas/with spaces";
+    const runId = "run/with spaces";
+    const created = {
+      run_id: runId,
+      status: "queued",
+      events_url: "/events?after=7",
+    };
+    const run = {
+      ...created,
+      canvas_id: canvasId,
+      operation: "research_evidence",
+      current_stage: null,
+      attempt: 0,
+      max_attempts: 3,
+      cancellation_state: "not_requested",
+      error: null,
+      created_at: "2026-07-15T12:00:00Z",
+      started_at: null,
+      completed_at: null,
+      ready_patch_id: null,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(created))
+      .mockResolvedValueOnce(response(run))
+      .mockResolvedValueOnce(
+        response({ ...run, cancellation_state: "requested" }),
+      )
+      .mockResolvedValueOnce(response({ ...run, status: "queued" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createGenerationRun(canvasId, {
+      operation: "research_evidence",
+      selected_node_ids: ["strategy-a"],
+      expected_node_versions: { "strategy-a": 2 },
+      instruction: null,
+      execution_profile_id: "demo_hybrid_v1",
+      idempotency_key: "run-key",
+      regeneration_scope: null,
+    });
+    await getGenerationRun(runId);
+    await cancelGenerationRun(runId);
+    await retryGenerationRun(runId);
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/canvases/canvas%2Fwith%20spaces/generation-runs",
+      "/api/generation-runs/run%2Fwith%20spaces",
+      "/api/generation-runs/run%2Fwith%20spaces/cancel",
+      "/api/generation-runs/run%2Fwith%20spaces/retry",
+    ]);
+    expect(
+      JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)),
+    ).toMatchObject({
+      operation: "research_evidence",
+      selected_node_ids: ["strategy-a"],
+      regeneration_scope: null,
+    });
+  });
+
+  it("bootstraps and resets an isolated demo with CSRF protection", async () => {
+    document.cookie = "csrftoken=demo-token; path=/";
+    const demo = {
+      session: {
+        expires_at: "2026-07-16T12:00:00Z",
+        hybrid_run_count: 0,
+        hybrid_run_limit: 12,
+        primary_profile: "demo_hybrid_v1" as const,
+        fallback_profile: "replay_v1" as const,
+      },
+      canvas: { id: "demo-canvas" },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(demo))
+      .mockResolvedValueOnce(response(demo));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await Promise.all([bootstrapDemo(), bootstrapDemo()]);
+    await resetDemo();
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/demo/bootstrap",
+      "/api/demo/reset",
+    ]);
+    const resetInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(resetInit.method).toBe("POST");
+    expect(resetInit.body).toBe("{}");
+    expect((resetInit.headers as Headers).get("X-CSRFToken")).toBe(
+      "demo-token",
+    );
   });
 });
 

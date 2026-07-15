@@ -109,6 +109,23 @@ def _regeneration_phase(kind: str) -> str:
     return "opportunity_family"
 
 
+def _regeneration_telemetry_dimensions(run: Any) -> dict[str, Any]:
+    if run.operation != RunOperation.REGENERATE_STALE:
+        return {}
+    regeneration = run.context_manifest.get("regeneration") or {}
+    targets = tuple(regeneration.get("targets") or ())
+    batch_sizes: dict[str, int] = {}
+    for target in targets:
+        phase = _regeneration_phase(str(target.get("kind")))
+        batch_sizes[phase] = batch_sizes.get(phase, 0) + 1
+    return {
+        "regeneration_scope": regeneration.get("scope"),
+        "regeneration_workset_size": len(targets),
+        "regeneration_batch_sizes": batch_sizes,
+        "lineage_mode": "parallel",
+    }
+
+
 def stage_plan_for_run(run: Any) -> tuple[StagePlanStep, ...]:
     if run.operation != RunOperation.REGENERATE_STALE:
         return _plan_steps(OPERATION_STAGE_PLANS[run.operation])
@@ -211,16 +228,23 @@ def _finalize_cancelled_run(run: Any, *, reason: str, stage_id: Any | None = Non
 
 
 def _cancel_if_requested(lease: RunLease, *, stage_id: Any | None = None) -> bool:
+    regeneration_dimensions: dict[str, Any] = {}
     with transaction.atomic():
         run = lock_fenced_run(lease)
         if run.cancel_requested_at is None:
             return False
+        regeneration_dimensions = _regeneration_telemetry_dimensions(run)
         _finalize_cancelled_run(
             run,
             reason="worker_observed_cancellation",
             stage_id=stage_id,
         )
-    emit_telemetry("run.cancelled", run_id=lease.run_id, lease_epoch=lease.lease_epoch)
+    emit_telemetry(
+        "run.cancelled",
+        run_id=lease.run_id,
+        lease_epoch=lease.lease_epoch,
+        **regeneration_dimensions,
+    )
     emit_patch_regeneration_terminal(
         run_id=lease.run_id,
         canvas_id=lease.canvas_id,
@@ -362,9 +386,11 @@ def _fail_run(
     *,
     stage_id: Any | None = None,
 ) -> None:
+    regeneration_dimensions: dict[str, Any] = {}
     try:
         with transaction.atomic():
             run = lock_fenced_run(lease)
+            regeneration_dimensions = _regeneration_telemetry_dimensions(run)
             persisted_error = error
             if error.retryable and run.attempt >= run.max_attempts:
                 persisted_error = RunErrorEnvelope(
@@ -421,6 +447,7 @@ def _fail_run(
         code=persisted_error.code,
         retryable=persisted_error.retryable,
         stage=persisted_error.stage,
+        **regeneration_dimensions,
     )
     emit_patch_regeneration_terminal(
         run_id=lease.run_id,
@@ -444,8 +471,10 @@ def _persist_patch_then_complete(lease: RunLease, patch_output: Any) -> bool:
             retryable=False,
         )
     validate_retained_payload(operations)
+    regeneration_dimensions: dict[str, Any] = {}
     with transaction.atomic():
         run = lock_fenced_run(lease)
+        regeneration_dimensions = _regeneration_telemetry_dimensions(run)
         if run.cancel_requested_at is not None:
             _finalize_cancelled_run(run, reason="cancelled_before_finalization")
             patch = None
@@ -470,14 +499,24 @@ def _persist_patch_then_complete(lease: RunLease, patch_output: Any) -> bool:
                 {"patch_id": str(patch.id), "operation_count": len(operations)},
             )
     if patch is None:
-        emit_telemetry("run.cancelled", run_id=lease.run_id, lease_epoch=lease.lease_epoch)
+        emit_telemetry(
+            "run.cancelled",
+            run_id=lease.run_id,
+            lease_epoch=lease.lease_epoch,
+            **regeneration_dimensions,
+        )
         emit_patch_regeneration_terminal(
             run_id=lease.run_id,
             canvas_id=lease.canvas_id,
             status=RunStatus.CANCELLED,
         )
         return False
-    emit_telemetry("patch.ready", run_id=lease.run_id, patch_id=patch.id)
+    emit_telemetry(
+        "patch.ready",
+        run_id=lease.run_id,
+        patch_id=patch.id,
+        **regeneration_dimensions,
+    )
 
     with transaction.atomic():
         run = lock_fenced_run(lease, statuses=(RunStatus.PATCH_READY,))
@@ -503,7 +542,12 @@ def _persist_patch_then_complete(lease: RunLease, patch_output: Any) -> bool:
             {"patch_id": str(patch.id), "attempt": run.attempt},
             terminal_once=True,
         )
-    emit_telemetry("run.completed", run_id=lease.run_id, patch_id=patch.id)
+    emit_telemetry(
+        "run.completed",
+        run_id=lease.run_id,
+        patch_id=patch.id,
+        **regeneration_dimensions,
+    )
     emit_patch_regeneration_terminal(
         run_id=lease.run_id,
         canvas_id=lease.canvas_id,
@@ -526,6 +570,15 @@ def process_claimed_run(
         context_manifest = run.context_manifest
         context_hash = run.context_hash
         base_canvas_revision = run.base_canvas_revision
+        regeneration_dimensions = _regeneration_telemetry_dimensions(run)
+
+    if regeneration_dimensions:
+        emit_telemetry(
+            "regeneration.started",
+            run_id=lease.run_id,
+            canvas_id=lease.canvas_id,
+            **regeneration_dimensions,
+        )
 
     prior_outputs: dict[str, Any] = {}
     final_patch_output: dict[str, Any] | None = None
@@ -550,7 +603,15 @@ def process_claimed_run(
             if checkpoint.reused:
                 assert checkpoint.result is not None
                 result = checkpoint.result
-                emit_telemetry("stage.reused", run_id=lease.run_id, stage=stage_name)
+                emit_telemetry(
+                    "stage.reused",
+                    run_id=lease.run_id,
+                    stage=stage_name,
+                    regeneration_phase=step.phase,
+                    regeneration_batch_size=len(step.targets),
+                    checkpoint_reused=True,
+                    **regeneration_dimensions,
+                )
             else:
                 try:
                     with telemetry_context(

@@ -1,0 +1,286 @@
+{
+  "schema_version": 1,
+  "scenario_set_version": "proofgraph-synthetic-opportunities-v1",
+  "scenarios": [
+    {
+      "scenario_id": "solo_django_b2b",
+      "title": "Solo Django consultant seeking recurring revenue",
+      "builder_profile": "A solo Django and PostgreSQL consultant has six years of delivery experience and direct relationships with small B2B software teams.",
+      "goal": "Reach $8,000 in monthly recurring revenue within twelve months.",
+      "constraints": ["Can invest at most twenty hours per week", "Has a $4,000 cash budget and no sales employee"],
+      "advantages": ["Can ship secure back-office software quickly", "Can interview twelve former clients"],
+      "preferences": ["Prefers a narrow B2B workflow over a consumer application"],
+      "evidence": [
+        {"evidence_id": "solo_django_e1", "observation": "Synthetic interviews show six of twelve former clients reconcile failed recurring invoices in spreadsheets every Monday.", "relevance": "The repeated workflow has a visible owner and measurable recovery value.", "limitation": "The sample comes only from the builder's existing network."},
+        {"evidence_id": "solo_django_e2", "observation": "A benchmark pricing page for a fictional incumbent starts at $1,200 per month and bundles broad revenue analytics.", "relevance": "A focused lower-complexity wedge could serve smaller teams.", "limitation": "Listed price does not prove willingness to switch."},
+        {"evidence_id": "solo_django_e3", "observation": "Three synthetic support logs describe payment failures caused by expired cards, bank declines, and missed customer follow-up.", "relevance": "The logs identify concrete failure categories and intervention points.", "limitation": "The logs do not quantify total recovered revenue."}
+      ]
+    },
+    {
+      "scenario_id": "real_estate_design_agency",
+      "title": "Design agency serving real-estate marketing teams",
+      "builder_profile": "A two-person design agency creates listing campaigns for regional real-estate brokers and has strong workflow automation skills but limited backend engineering depth.",
+      "goal": "Add a repeatable software product that can produce $5,000 monthly revenue.",
+      "constraints": ["Must launch a useful pilot in eight weeks", "Cannot handle regulated transaction funds or replace licensed advice"],
+      "advantages": ["Has access to forty broker marketing contacts", "Owns reusable campaign templates"],
+      "preferences": ["Wants a visual workflow with human approval before publication"],
+      "evidence": [
+        {"evidence_id": "real_estate_e1", "observation": "Synthetic workflow diaries show coordinators copy listing facts into five channel-specific templates for each property.", "relevance": "Repeated transformation and review work matches the agency's design assets.", "limitation": "Diary participants work at only four brokerages."},
+        {"evidence_id": "real_estate_e2", "observation": "Seven fictional coordinators report that correcting inconsistent prices or dates after publication is their most costly rework.", "relevance": "A validation checkpoint could prevent a specific expensive failure.", "limitation": "The evidence ranks pain but does not estimate a budget."},
+        {"evidence_id": "real_estate_e3", "observation": "A synthetic platform policy matrix shows every target channel permits drafts but uses a different required field set.", "relevance": "Draft generation with channel validation is technically bounded.", "limitation": "Platform policies could change and require maintenance."}
+      ]
+    },
+    {
+      "scenario_id": "security_engineer_runway",
+      "title": "Security engineer with twelve months of runway",
+      "builder_profile": "An application-security engineer has twelve months of runway, experience with cloud controls, and trusted access to startup engineering leaders.",
+      "goal": "Validate a defensible security product before committing the full runway.",
+      "constraints": ["Must avoid storing customer secrets", "Needs a paid design partner within ten weeks"],
+      "advantages": ["Can evaluate security claims credibly", "Can reach twenty startup CTOs"],
+      "preferences": ["Prefers preventative tooling with reviewer control"],
+      "evidence": [
+        {"evidence_id": "security_runway_e1", "observation": "Synthetic CTO interviews show teams repeatedly assemble customer security evidence from tickets, cloud consoles, and policy documents.", "relevance": "The mandatory workflow repeats and already consumes technical leadership time.", "limitation": "Interview recall may overstate time spent."},
+        {"evidence_id": "security_runway_e2", "observation": "A fictional incident review records two sales delays caused by outdated answers that no longer matched deployed controls.", "relevance": "Freshness checking creates a concrete product boundary beyond answer storage.", "limitation": "Two delays do not establish population frequency."},
+        {"evidence_id": "security_runway_e3", "observation": "A synthetic procurement survey says buyers require evidence links and accountable human approval for generated responses.", "relevance": "The required controls align with the builder's expertise and preferences.", "limitation": "Survey intent does not guarantee purchasing behavior."}
+      ]
+    },
+    {
+      "scenario_id": "data_engineer_self_service",
+      "title": "Data engineer productizing internal self-service",
+      "builder_profile": "A senior data engineer has built internal catalog and quality tools for mid-sized companies and can collaborate with one part-time product designer.",
+      "goal": "Turn a repeated internal capability into a sustainable small-team SaaS.",
+      "constraints": ["Cannot require a six-month data migration", "Initial product must integrate read-only with common warehouses"],
+      "advantages": ["Understands metadata systems deeply", "Has eight former analytics-manager contacts"],
+      "preferences": ["Wants usage-based value without per-seat friction"],
+      "evidence": [
+        {"evidence_id": "data_self_service_e1", "observation": "Synthetic request logs show analysts ask the same metric-definition questions across chat, tickets, and meetings.", "relevance": "Repeated questions can be mapped to existing metadata and ownership.", "limitation": "Logs are drawn from two fictional companies."},
+        {"evidence_id": "data_self_service_e2", "observation": "Five benchmark interviews describe abandoned catalog rollouts because maintaining descriptions became a separate manual project.", "relevance": "Automatic workflow capture may differentiate from a static catalog.", "limitation": "The interviews do not isolate catalog design from change-management failures."},
+        {"evidence_id": "data_self_service_e3", "observation": "A synthetic cost ledger attributes thirty analyst hours per month to locating owners and validating definitions.", "relevance": "The ledger gives a measurable value hypothesis for a narrow test.", "limitation": "Attributed hours are estimates rather than observed time tracking."}
+      ]
+    },
+    {
+      "scenario_id": "logistics_domain_team",
+      "title": "Logistics operators building exception software",
+      "builder_profile": "A former freight dispatcher and a full-stack engineer understand regional logistics operations and have relationships with small carrier managers.",
+      "goal": "Find a high-frequency operational wedge that ten carriers will pay for.",
+      "constraints": ["Cannot install vehicle hardware", "Must work with incomplete and delayed status data"],
+      "advantages": ["Deep dispatcher workflow knowledge", "Warm access to fifteen carrier offices"],
+      "preferences": ["Prefers exception handling over another broad transportation suite"],
+      "evidence": [
+        {"evidence_id": "logistics_team_e1", "observation": "Synthetic dispatch logs show late pickup updates trigger repeated calls among dispatchers, drivers, and customer representatives.", "relevance": "The exception creates costly coordination with identifiable participants.", "limitation": "The logs cover regional freight rather than all carrier segments."},
+        {"evidence_id": "logistics_team_e2", "observation": "A fictional carrier manager reports that existing suite alerts are noisy because they ignore customer-specific escalation rules.", "relevance": "Configurable escalation could be a focused wedge around incumbent data.", "limitation": "One manager's complaint may not generalize."},
+        {"evidence_id": "logistics_team_e3", "observation": "A synthetic integration inventory shows target carriers already export status events through email, CSV, or basic webhooks.", "relevance": "The product can start without new hardware or a full system replacement.", "limitation": "Data timeliness remains inconsistent across sources."}
+      ]
+    },
+    {
+      "scenario_id": "accountant_smb_distribution",
+      "title": "Accountant with trusted small-business distribution",
+      "builder_profile": "An accountant who advises one hundred small businesses can fund a contract developer and understands recurring bookkeeping review workflows.",
+      "goal": "Launch a low-support product that improves client operations and creates recurring income.",
+      "constraints": ["Must not present automated tax or legal advice", "Can spend only ten hours per week on the product"],
+      "advantages": ["Trusted access to business owners", "Recognizes common bookkeeping exceptions"],
+      "preferences": ["Wants clear human review and a simple monthly price"],
+      "evidence": [
+        {"evidence_id": "accountant_smb_e1", "observation": "Synthetic month-end checklists show missing receipts and unclear transaction descriptions cause repeated client follow-up.", "relevance": "The pattern is recurring, bounded, and precedes expert accounting review.", "limitation": "Checklist frequency varies by client bookkeeping quality."},
+        {"evidence_id": "accountant_smb_e2", "observation": "A fictional time study assigns four staff hours per client each month to requesting and matching missing documents.", "relevance": "The time estimate supports a direct operational savings hypothesis.", "limitation": "Staff may behave differently when observed."},
+        {"evidence_id": "accountant_smb_e3", "observation": "Synthetic client interviews prefer receiving one consolidated request with examples instead of several accounting-system notifications.", "relevance": "Consolidated communication could improve response without replacing professional judgment.", "limitation": "Stated preference does not measure completion rates."}
+      ]
+    },
+    {
+      "scenario_id": "healthcare_ops_no_phi",
+      "title": "Healthcare operator avoiding protected health data",
+      "builder_profile": "A clinic operations manager and a no-code specialist know outpatient administration but deliberately want an initial product that stores no patient health information.",
+      "goal": "Validate a clinic operations product with five paid locations in six months.",
+      "constraints": ["The first version cannot ingest protected health information", "Neither founder is a clinician or compliance lawyer"],
+      "advantages": ["Can reach thirty clinic managers", "Understands staffing and vendor workflows"],
+      "preferences": ["Prefers administrative coordination with explicit owner assignments"],
+      "evidence": [
+        {"evidence_id": "healthcare_ops_e1", "observation": "Synthetic manager diaries show expiring vendor documents are tracked in shared calendars and email folders.", "relevance": "Document status and ownership can be managed without patient data.", "limitation": "Vendor categories differ across clinic types."},
+        {"evidence_id": "healthcare_ops_e2", "observation": "A fictional audit preparation log lists repeated searches for current contracts, insurance certificates, and training attestations.", "relevance": "Evidence readiness is mandatory administrative work with a clear deadline.", "limitation": "The log does not establish willingness to buy separate software."},
+        {"evidence_id": "healthcare_ops_e3", "observation": "Synthetic interviews report that broad compliance suites feel too complex for a five-location operator.", "relevance": "A narrow downmarket workflow may reduce setup and support burden.", "limitation": "The incumbent comparison is based on perceived rather than tested complexity."}
+      ]
+    },
+    {
+      "scenario_id": "devtool_oss_maintainer",
+      "title": "Open-source maintainer considering commercialization",
+      "builder_profile": "The maintainer of a moderately adopted developer tool has strong systems skills, an active contributor community, and no dedicated sales experience.",
+      "goal": "Create sustainable revenue without degrading the open-source project or community trust.",
+      "constraints": ["Core functionality must remain under its existing permissive license", "Can hire at most one support engineer this year"],
+      "advantages": ["Direct access to project users", "Deep operational knowledge of the tool"],
+      "preferences": ["Wants transparent boundaries between community and paid offerings"],
+      "evidence": [
+        {"evidence_id": "devtool_oss_e1", "observation": "Synthetic issue data shows teams repeatedly ask how to operate upgrades, backups, and access controls in production.", "relevance": "Operational burden may support hosting or governance value around the project.", "limitation": "Issue authors are not necessarily budget owners."},
+        {"evidence_id": "devtool_oss_e2", "observation": "A fictional user survey ranks predictable upgrades above new core features for company deployments.", "relevance": "The result points toward reliability rather than withholding open features.", "limitation": "Survey respondents self-selected from active users."},
+        {"evidence_id": "devtool_oss_e3", "observation": "Synthetic contributor notes warn that paid-only documentation would reduce trust and increase duplicate support work.", "relevance": "The evidence constrains monetization models that harm the community commons.", "limitation": "Contributor views may differ from company buyers."}
+      ]
+    },
+    {
+      "scenario_id": "ecommerce_agency_shopify",
+      "title": "E-commerce agency productizing retention work",
+      "builder_profile": "A small e-commerce agency manages storefront operations for thirty specialty retailers and can build platform extensions and analytics dashboards.",
+      "goal": "Productize one recurring agency workflow into a $10,000 monthly SaaS line.",
+      "constraints": ["Must comply with marketplace and merchant data terms", "Cannot depend on replacing the merchant's email platform"],
+      "advantages": ["Access to merchant operators", "Historical knowledge of promotion workflows"],
+      "preferences": ["Prefers measurable revenue recovery over vanity analytics"],
+      "evidence": [
+        {"evidence_id": "ecommerce_agency_e1", "observation": "Synthetic campaign reviews show promotion exclusions are manually reconciled across catalog tags, discount rules, and email segments.", "relevance": "The reconciliation is repeated and errors directly affect margin or customer trust.", "limitation": "Existing agency clients may use unusually complex catalogs."},
+        {"evidence_id": "ecommerce_agency_e2", "observation": "A fictional postmortem records three margin-loss events caused by stacked discounts that violated campaign intent.", "relevance": "Preventing a measurable failure offers clearer value than another reporting view.", "limitation": "Three events do not establish expected annual loss."},
+        {"evidence_id": "ecommerce_agency_e3", "observation": "Synthetic operator interviews say they would test a preflight report but will not grant automatic price-change permission.", "relevance": "A read-only approval workflow fits buyer risk tolerance and platform constraints.", "limitation": "Test interest is not a paid commitment."}
+      ]
+    },
+    {
+      "scenario_id": "construction_pm_mobile",
+      "title": "Construction manager with mobile workflow access",
+      "builder_profile": "A former commercial construction project manager and a mobile developer have access to subcontractor supervisors and understand field documentation handoffs.",
+      "goal": "Win three paid pilots for a field-first workflow within four months.",
+      "constraints": ["Must function with intermittent connectivity", "Cannot require every subcontractor to adopt a new account"],
+      "advantages": ["Can observe active jobsite workflows", "Knows project closeout requirements"],
+      "preferences": ["Wants a small workflow that complements existing project systems"],
+      "evidence": [
+        {"evidence_id": "construction_pm_e1", "observation": "Synthetic closeout records show supervisors chase equipment manuals and warranty photos weeks after installation.", "relevance": "Capturing evidence at installation could prevent a late, expensive information gap.", "limitation": "Closeout practices vary by general contractor."},
+        {"evidence_id": "construction_pm_e2", "observation": "A fictional field study finds subcontractors readily send photos by text but resist full project-management accounts.", "relevance": "Low-friction capture is a required product and distribution constraint.", "limitation": "Observed crews may be more cooperative than the wider market."},
+        {"evidence_id": "construction_pm_e3", "observation": "Synthetic manager estimates attribute ten hours per project to labeling, sorting, and requesting missing closeout evidence.", "relevance": "The estimate supports a bounded labor-savings test with project managers.", "limitation": "Self-reported hours have not been independently measured."}
+      ]
+    },
+    {
+      "scenario_id": "compliance_consultant",
+      "title": "Compliance consultant reducing repeated evidence work",
+      "builder_profile": "A privacy compliance consultant serves software vendors, understands evidence review, and can partner with a backend engineer for a focused product.",
+      "goal": "Create recurring revenue while reserving expert time for ambiguous cases.",
+      "constraints": ["Software cannot promise legal compliance", "Every consequential output needs traceable evidence and human approval"],
+      "advantages": ["Has reusable review checklists", "Can recruit ten design partners"],
+      "preferences": ["Prefers exception review over autonomous decisions"],
+      "evidence": [
+        {"evidence_id": "compliance_consult_e1", "observation": "Synthetic project logs show consultants repeatedly map the same policy clauses to different customer questionnaire wording.", "relevance": "A traceable first-pass mapping can reduce repeated expert work.", "limitation": "Questionnaire formats and clause quality vary substantially."},
+        {"evidence_id": "compliance_consult_e2", "observation": "A fictional client review finds stale policy versions caused more corrections than incorrect clause interpretation.", "relevance": "Version freshness may be a safer and more measurable product wedge.", "limitation": "One review may reflect that client's document practices."},
+        {"evidence_id": "compliance_consult_e3", "observation": "Synthetic buyers require every suggested response to show its source passage and last-reviewed owner.", "relevance": "Provenance and reviewer control are explicit adoption requirements.", "limitation": "Requirements do not reveal acceptable price."}
+      ]
+    },
+    {
+      "scenario_id": "educator_creator_audience",
+      "title": "Technical educator with an engaged audience",
+      "builder_profile": "A technical educator has an audience of fifteen thousand junior developers, creates practical coding courses, and can build lightweight web applications.",
+      "goal": "Develop a subscription product that improves learner outcomes beyond selling more videos.",
+      "constraints": ["Must avoid high-touch one-to-one tutoring", "Can produce only four hours of new content per week"],
+      "advantages": ["Owns a large library of exercises", "Can reach learners directly through a newsletter"],
+      "preferences": ["Wants visible skill progress and honest feedback rather than engagement tricks"],
+      "evidence": [
+        {"evidence_id": "educator_creator_e1", "observation": "Synthetic course data shows learners complete videos but repeatedly stop before submitting portfolio projects.", "relevance": "The gap is between content consumption and applied proof of skill.", "limitation": "Completion behavior may differ outside this educator's audience."},
+        {"evidence_id": "educator_creator_e2", "observation": "A fictional learner survey ranks choosing project scope and knowing what to fix above access to more lessons.", "relevance": "Structured project review could add value without a large content burden.", "limitation": "Survey answers may not predict subscription retention."},
+        {"evidence_id": "educator_creator_e3", "observation": "Synthetic newsletter tests show short project teardown emails receive twice the reply rate of course discount emails.", "relevance": "The audience responds to applied feedback and provides a reachable test channel.", "limitation": "Reply rate is not equivalent to paid demand."}
+      ]
+    },
+    {
+      "scenario_id": "manufacturing_quality_engineer",
+      "title": "Quality engineer serving small manufacturers",
+      "builder_profile": "A manufacturing quality engineer and an industrial software developer understand corrective-action workflows at small component suppliers.",
+      "goal": "Build a product that can support a high-value annual contract with twenty plants.",
+      "constraints": ["Cannot connect directly to machinery in the first release", "Must preserve customer-controlled approval and audit trails"],
+      "advantages": ["Knows quality-management terminology", "Can access six plant managers for discovery"],
+      "preferences": ["Prefers a focused corrective-action tool over a full manufacturing suite"],
+      "evidence": [
+        {"evidence_id": "manufacturing_qe_e1", "observation": "Synthetic audit findings show corrective actions are tracked across spreadsheets, email attachments, and meeting notes.", "relevance": "Fragmented ownership and evidence create a bounded coordination problem.", "limitation": "Audit findings describe failure cases rather than everyday workflow frequency."},
+        {"evidence_id": "manufacturing_qe_e2", "observation": "A fictional manager study says late supplier responses cause more delay than root-cause analysis itself.", "relevance": "External follow-up and deadline risk may be the most valuable initial wedge.", "limitation": "Managers may understate internal analysis problems."},
+        {"evidence_id": "manufacturing_qe_e3", "observation": "Synthetic procurement notes require exportable histories and named approval owners before pilot approval.", "relevance": "Auditability and reviewer control are non-negotiable product requirements.", "limitation": "Procurement requirements may lengthen early sales."}
+      ]
+    },
+    {
+      "scenario_id": "legal_ops_small_team",
+      "title": "Legal operations specialist serving small teams",
+      "builder_profile": "A legal operations specialist and a workflow engineer have experience organizing commercial contract processes but will not automate legal judgment.",
+      "goal": "Create a useful operations product for companies without dedicated legal operations staff.",
+      "constraints": ["Must not provide legal advice or negotiate terms autonomously", "Needs a low-configuration pilot deployable in one day"],
+      "advantages": ["Understands contract intake handoffs", "Can reach fifteen operations leaders"],
+      "preferences": ["Wants administrative visibility and escalation rather than document generation"],
+      "evidence": [
+        {"evidence_id": "legal_ops_e1", "observation": "Synthetic intake logs show contract requests arrive through chat, email, and forms with missing owners and deadlines.", "relevance": "Normalization and ownership can improve operations without interpreting legal terms.", "limitation": "The logs represent technology companies only."},
+        {"evidence_id": "legal_ops_e2", "observation": "A fictional cycle-time review attributes most avoidable delay to unanswered business questions before legal review starts.", "relevance": "Pre-review completeness is a testable administrative bottleneck.", "limitation": "Cycle-time attribution relies on manually coded reasons."},
+        {"evidence_id": "legal_ops_e3", "observation": "Synthetic interviews say requesters want status visibility but legal reviewers do not want another document repository.", "relevance": "A lightweight coordination layer could complement existing storage.", "limitation": "Integration expectations remain unspecified."}
+      ]
+    },
+    {
+      "scenario_id": "nonprofit_grants_ops",
+      "title": "Nonprofit grants operator with sector access",
+      "builder_profile": "A former nonprofit grants manager and a generalist developer understand reporting obligations and can interview small nonprofit directors.",
+      "goal": "Build an affordable product with repeatable distribution through nonprofit networks.",
+      "constraints": ["Target organizations have limited software budgets", "The product cannot depend on replacing accounting systems"],
+      "advantages": ["Knows grant reporting calendars", "Has access to two nonprofit associations"],
+      "preferences": ["Wants transparent time savings and accessible pricing"],
+      "evidence": [
+        {"evidence_id": "nonprofit_grants_e1", "observation": "Synthetic reporting calendars show program evidence is requested from the same internal owners shortly before each grant deadline.", "relevance": "Earlier recurring collection could reduce deadline risk and staff interruption.", "limitation": "Grant requirements differ across funders."},
+        {"evidence_id": "nonprofit_grants_e2", "observation": "A fictional director survey identifies missed narrative evidence, not financial totals, as the most common report scramble.", "relevance": "The wedge can complement accounting rather than replace it.", "limitation": "Directors may not observe every staff bottleneck."},
+        {"evidence_id": "nonprofit_grants_e3", "observation": "Synthetic association notes show member workshops reach many organizations but vendors rarely offer shared onboarding.", "relevance": "Association-led cohort onboarding may reduce acquisition and support cost.", "limitation": "Workshop attendance does not imply purchasing authority."}
+      ]
+    },
+    {
+      "scenario_id": "restaurant_group_ops",
+      "title": "Restaurant group operator reducing location variance",
+      "builder_profile": "An operations director from a twelve-location restaurant group and a mobile web developer understand manager checklists and vendor coordination.",
+      "goal": "Validate a product with multi-location operators while keeping frontline usage simple.",
+      "constraints": ["Frontline tasks must take under two minutes", "Cannot require new point-of-sale hardware or integrations initially"],
+      "advantages": ["Can pilot in three locations", "Understands district-manager review cadence"],
+      "preferences": ["Prefers exception visibility over exhaustive task tracking"],
+      "evidence": [
+        {"evidence_id": "restaurant_ops_e1", "observation": "Synthetic district reviews show recurring equipment issues are logged inconsistently and rediscovered during weekly calls.", "relevance": "Lightweight capture and escalation may prevent repeated operational loss.", "limitation": "Equipment failure patterns vary by restaurant format."},
+        {"evidence_id": "restaurant_ops_e2", "observation": "A fictional manager time study finds long daily checklists are often completed retrospectively without useful notes.", "relevance": "Exception-first interaction better fits frontline time constraints.", "limitation": "Observed behavior may change during the study."},
+        {"evidence_id": "restaurant_ops_e3", "observation": "Synthetic operator interviews value proof of resolution across locations more than another aggregate score.", "relevance": "Resolution evidence supplies a specific buyer-facing outcome.", "limitation": "The interviews do not quantify contract value."}
+      ]
+    },
+    {
+      "scenario_id": "climate_analyst_procurement",
+      "title": "Climate analyst focused on procurement evidence",
+      "builder_profile": "A climate data analyst and a procurement software engineer know supplier-data workflows and want to avoid unsupported sustainability claims.",
+      "goal": "Create a credible supplier operations product for mid-market manufacturers.",
+      "constraints": ["Must display source limitations and never invent missing measurements", "Cannot require suppliers to buy software"],
+      "advantages": ["Can normalize messy public and supplier data", "Has access to eight procurement leaders"],
+      "preferences": ["Wants decision support with provenance rather than a headline score"],
+      "evidence": [
+        {"evidence_id": "climate_procure_e1", "observation": "Synthetic supplier reviews show buyers repeatedly request the same facility and material evidence in different spreadsheet formats.", "relevance": "Reusable evidence mapping can reduce mandatory coordination work.", "limitation": "The benchmark does not establish accuracy of supplier submissions."},
+        {"evidence_id": "climate_procure_e2", "observation": "A fictional procurement log records delays when analysts cannot distinguish missing data from an explicit zero value.", "relevance": "Data-state clarity is a narrow, testable workflow improvement.", "limitation": "Delay costs have not been monetized."},
+        {"evidence_id": "climate_procure_e3", "observation": "Synthetic buyer interviews reject opaque composite scores but accept field-level provenance and confidence labels.", "relevance": "The preferred design aligns with the founders' evidence skills.", "limitation": "Acceptance in interviews does not prove routine usage."}
+      ]
+    },
+    {
+      "scenario_id": "recruiter_niche_network",
+      "title": "Niche recruiter with a trusted candidate network",
+      "builder_profile": "An independent recruiter specializes in industrial automation roles, maintains a trusted candidate network, and can hire a contract developer.",
+      "goal": "Reduce placement volatility by adding recurring employer revenue.",
+      "constraints": ["Must not make autonomous hiring decisions", "Can support no more than five pilot employers personally"],
+      "advantages": ["Understands role-specific skill signals", "Has direct access to hiring managers and candidates"],
+      "preferences": ["Wants structured workflow support rather than a generic job board"],
+      "evidence": [
+        {"evidence_id": "recruiter_niche_e1", "observation": "Synthetic intake reviews show employers reuse old job descriptions that omit the actual equipment and shift constraints.", "relevance": "Improving intake specificity can reduce wasted sourcing before any hiring judgment.", "limitation": "The evidence comes from the recruiter's own placements."},
+        {"evidence_id": "recruiter_niche_e2", "observation": "A fictional rejection analysis finds late discovery of travel requirements causes more candidate withdrawals than compensation mismatch.", "relevance": "Early constraint validation is a measurable operational wedge.", "limitation": "Coded withdrawal reasons may be incomplete."},
+        {"evidence_id": "recruiter_niche_e3", "observation": "Synthetic hiring managers say they will pay for shorter intake cycles but require final candidate review to remain human.", "relevance": "The buyer outcome and control boundary are both explicit.", "limitation": "Stated payment intent lacks a signed pilot."}
+      ]
+    },
+    {
+      "scenario_id": "fintech_risk_analyst",
+      "title": "Risk analyst productizing policy operations",
+      "builder_profile": "A former fintech risk analyst and a backend engineer understand internal policy attestations but are not building regulated financial advice or automated approvals.",
+      "goal": "Find a low-liability operational product with enterprise expansion potential.",
+      "constraints": ["Must not approve customers or transactions", "Needs immutable history and customer-controlled retention"],
+      "advantages": ["Knows risk-control evidence workflows", "Can reach ten compliance operations managers"],
+      "preferences": ["Prefers accountable reviewer queues over automated decisions"],
+      "evidence": [
+        {"evidence_id": "fintech_risk_e1", "observation": "Synthetic audit preparation shows control owners repeatedly re-answer who approved a policy exception and which evidence was current.", "relevance": "Provenance and freshness are mandatory operational questions.", "limitation": "Audit preparation is periodic rather than daily."},
+        {"evidence_id": "fintech_risk_e2", "observation": "A fictional exception register contains duplicate entries because teams use separate ticket and spreadsheet identifiers.", "relevance": "Cross-system identity and status reconciliation is a concrete workflow problem.", "limitation": "The example may reflect poor local process rather than market need."},
+        {"evidence_id": "fintech_risk_e3", "observation": "Synthetic manager interviews say broad governance suites take months to configure for a single exception workflow.", "relevance": "A narrower deployable layer could move an enterprise capability downmarket.", "limitation": "Configuration estimates have not been independently verified."}
+      ]
+    },
+    {
+      "scenario_id": "property_manager_portfolio",
+      "title": "Property manager coordinating recurring inspections",
+      "builder_profile": "A residential property manager with a portfolio of eight hundred units and a full-stack developer understand vendor, tenant, and owner communication workflows.",
+      "goal": "Pilot a recurring operations product that can expand to similar regional managers.",
+      "constraints": ["Cannot replace the core property-management system", "Initial workflow must avoid collecting rent or making tenancy decisions"],
+      "advantages": ["Can pilot against real operational schedules", "Has relationships with regional property managers"],
+      "preferences": ["Wants evidence of completion and clear exception ownership"],
+      "evidence": [
+        {"evidence_id": "property_portfolio_e1", "observation": "Synthetic inspection logs show smoke-alarm and seasonal maintenance evidence arrives through vendor texts, email, and paper invoices.", "relevance": "Fragmented proof creates recurring reconciliation and owner-reporting work.", "limitation": "Inspection obligations vary by jurisdiction and property type."},
+        {"evidence_id": "property_portfolio_e2", "observation": "A fictional operations review finds staff spend more time chasing missing photos and unit identifiers than scheduling vendors.", "relevance": "Capture completeness is a narrower wedge than full vendor management.", "limitation": "The time split is based on one portfolio."},
+        {"evidence_id": "property_portfolio_e3", "observation": "Synthetic peer interviews require exports into existing systems and reject a second resident communication portal.", "relevance": "The product must complement the incumbent and focus on internal evidence flow.", "limitation": "Export requirements differ by incumbent platform."}
+      ]
+    }
+  ]
+}

@@ -10,6 +10,13 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_http_methods
 from pydantic import ValidationError
 
+from proofgraph.demo.authorization import (
+    authorize_canvas,
+    authorize_ingestion,
+    authorize_patch,
+    authorize_run,
+    authorize_source,
+)
 from proofgraph.generation.patch_application import apply_graph_patch
 from proofgraph.generation.patches import (
     get_graph_patch,
@@ -121,41 +128,51 @@ def _json_object(request: HttpRequest) -> dict[str, Any]:
 @require_http_methods(["POST"])
 @_api_errors
 def generation_run_collection(request: HttpRequest, canvas_id: uuid.UUID) -> JsonResponse:
+    session = authorize_canvas(request, canvas_id)
     payload = _json_object(request)
     envelope = GenerationRunRequest.model_validate_json(json.dumps(payload))
-    result = create_generation_run(canvas_id, envelope)
+    result = create_generation_run(
+        canvas_id,
+        envelope,
+        demo_session_id=session.id if session is not None else None,
+    )
     return JsonResponse(result.payload, status=result.status)
 
 
 @require_http_methods(["GET"])
 @_api_errors
-def generation_run_detail(_request: HttpRequest, run_id: uuid.UUID) -> JsonResponse:
+def generation_run_detail(request: HttpRequest, run_id: uuid.UUID) -> JsonResponse:
+    authorize_run(request, run_id)
     return JsonResponse(serialize_generation_run(get_generation_run(run_id)))
 
 
 @require_http_methods(["POST"])
 @_api_errors
-def generation_run_cancel(_request: HttpRequest, run_id: uuid.UUID) -> JsonResponse:
+def generation_run_cancel(request: HttpRequest, run_id: uuid.UUID) -> JsonResponse:
+    authorize_run(request, run_id)
     result = cancel_generation_run(run_id)
     return JsonResponse(result.payload, status=result.status)
 
 
 @require_http_methods(["POST"])
 @_api_errors
-def generation_run_retry(_request: HttpRequest, run_id: uuid.UUID) -> JsonResponse:
+def generation_run_retry(request: HttpRequest, run_id: uuid.UUID) -> JsonResponse:
+    authorize_run(request, run_id)
     result = retry_generation_run(run_id)
     return JsonResponse(result.payload, status=result.status)
 
 
 @require_http_methods(["GET"])
 @_api_errors
-def graph_patch_detail(_request: HttpRequest, patch_id: uuid.UUID) -> JsonResponse:
+def graph_patch_detail(request: HttpRequest, patch_id: uuid.UUID) -> JsonResponse:
+    authorize_patch(request, patch_id)
     return JsonResponse({"patch": serialize_graph_patch(get_graph_patch(patch_id))})
 
 
 @require_http_methods(["POST"])
 @_api_errors
 def graph_patch_reject(request: HttpRequest, patch_id: uuid.UUID) -> JsonResponse:
+    authorize_patch(request, patch_id)
     payload = _json_object(request)
     if payload:
         raise GraphAPIError(
@@ -171,6 +188,7 @@ def graph_patch_reject(request: HttpRequest, patch_id: uuid.UUID) -> JsonRespons
 @require_http_methods(["POST"])
 @_api_errors
 def graph_patch_apply(request: HttpRequest, patch_id: uuid.UUID) -> JsonResponse:
+    authorize_patch(request, patch_id)
     payload = _json_object(request)
     try:
         envelope = PatchApplyRequest.model_validate_json(json.dumps(payload))
@@ -188,6 +206,7 @@ def graph_patch_apply(request: HttpRequest, patch_id: uuid.UUID) -> JsonResponse
 @require_http_methods(["POST"])
 @_api_errors
 def graph_patch_regenerate(request: HttpRequest, patch_id: uuid.UUID) -> JsonResponse:
+    session = authorize_patch(request, patch_id)
     payload = _json_object(request)
     try:
         envelope = PatchRegenerationRequest.model_validate_json(json.dumps(payload))
@@ -198,13 +217,18 @@ def graph_patch_regenerate(request: HttpRequest, patch_id: uuid.UUID) -> JsonRes
             message="The patch-regeneration request is invalid.",
             details={"validation": json.loads(error.json(include_url=False))},
         ) from error
-    result = regenerate_graph_patch(patch_id, envelope)
+    result = regenerate_graph_patch(
+        patch_id,
+        envelope,
+        demo_session_id=session.id if session is not None else None,
+    )
     return JsonResponse(result.payload, status=result.status)
 
 
 @require_http_methods(["POST"])
 @_api_errors
 def source_collection(request: HttpRequest, canvas_id: uuid.UUID) -> JsonResponse:
+    authorize_canvas(request, canvas_id)
     payload = _json_object(request)
     try:
         envelope = SourceIngestionEnvelope.model_validate_json(json.dumps(payload))
@@ -222,13 +246,15 @@ def source_collection(request: HttpRequest, canvas_id: uuid.UUID) -> JsonRespons
 @require_http_methods(["GET"])
 @_api_errors
 def source_ingestion_detail(
-    _request: HttpRequest,
+    request: HttpRequest,
     ingestion_id: uuid.UUID,
 ) -> JsonResponse:
+    authorize_ingestion(request, ingestion_id)
     return JsonResponse(serialize_ingestion(get_source_ingestion(ingestion_id)))
 
 
 @require_http_methods(["GET"])
 @_api_errors
-def source_detail(_request: HttpRequest, source_id: uuid.UUID) -> JsonResponse:
+def source_detail(request: HttpRequest, source_id: uuid.UUID) -> JsonResponse:
+    authorize_source(request, source_id)
     return JsonResponse({"source": serialize_source_node(get_source(source_id))})

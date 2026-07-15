@@ -1,8 +1,10 @@
 import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react";
@@ -11,13 +13,21 @@ import {
   ApiError,
   applyGraphPatch,
   applyOperation,
+  bootstrapDemo,
+  cancelGenerationRun,
   checkRuntime,
   createCanvas,
+  createGenerationRun,
+  type DemoSession,
   type DeleteEdgeResult,
   type DeleteNodeResult,
   type DependencyConflictDetails,
   type EdgeOperationResult,
+  type GenerationEvent,
+  type GenerationOperation,
+  type GenerationRunRequest,
   getCanvas,
+  getGenerationRun,
   getGraphPatch,
   type GraphPatch,
   type NodeOperationResult,
@@ -25,7 +35,16 @@ import {
   regenerateGraphPatch,
   rejectGraphPatch,
   renameCanvas,
+  resetDemo,
+  retryGenerationRun,
 } from "./api";
+import {
+  canRetryRun,
+  generationProgressReducer,
+  INITIAL_GENERATION_PROGRESS,
+  isRunPlaceholderVisible,
+  type RunProgress,
+} from "./generation";
 import {
   CREATABLE_NODE_KINDS,
   clampNodePosition,
@@ -86,10 +105,174 @@ type EdgeInput = {
   kind: EdgeKind;
 };
 
+type EvidenceActionResult = {
+  canvas_revision: number;
+  rejected_evidence_id: string;
+  rejected_claim_ids: string[];
+  retained_claim_ids: string[];
+  stale_node_ids: string[];
+  newly_stale_node_ids: string[];
+};
+
+type AssumptionReplacementResult = NodeOperationResult & {
+  previous_assumption: {
+    title: string;
+    body: string | null;
+    version: number;
+    opportunity_id: string;
+  };
+  stale_node_ids: string[];
+  newly_stale_node_ids: string[];
+};
+
+type BranchComparison = {
+  selected: GraphNode;
+  peers: GraphNode[];
+  lineageEdges: GraphEdge[];
+};
+
+const GENERATION_EVENT_TYPES: GenerationEvent["event_type"][] = [
+  "run.started",
+  "run.resumed",
+  "run.retry_requested",
+  "stage.started",
+  "stage.progress",
+  "research.query_created",
+  "research.source_found",
+  "evidence.extracted",
+  "candidate.generated",
+  "candidate.critiqued",
+  "patch.ready",
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+];
+
+function reviewStatus(node: GraphNode): string | null {
+  return typeof node.metadata.review_status === "string"
+    ? node.metadata.review_status
+    : null;
+}
+
+function isGeneratedNode(node: GraphNode): boolean {
+  return (
+    typeof node.metadata.generated_by_run_id === "string" ||
+    typeof node.metadata.generation_run_id === "string"
+  );
+}
+
+function generationDisabledReason(
+  node: GraphNode,
+  operation: GenerationOperation,
+): string | null {
+  const status = reviewStatus(node);
+  if (status === "rejected")
+    return "Rejected evidence is excluded from generation.";
+  if (status === "provisional") {
+    return "Provisional evidence must be accepted through patch review first.";
+  }
+
+  if (operation === "generate_strategies") {
+    if (node.stale) return "Stale inputs cannot start strategy generation.";
+    return ["goal", "constraint"].includes(node.kind)
+      ? null
+      : "Select exactly one goal and at least one constraint.";
+  }
+  if (operation === "research_evidence") {
+    if (node.kind !== "strategy")
+      return "Evidence research requires one strategy.";
+    if (node.stale) return "A stale strategy must be regenerated first.";
+    if (status !== "accepted")
+      return "Only an accepted strategy can be researched.";
+    return null;
+  }
+  if (operation === "synthesize_opportunities") {
+    if (!["strategy", "claim"].includes(node.kind)) {
+      return "Synthesis requires one strategy and one or more accepted claims.";
+    }
+    if (node.stale) return "Stale inputs cannot be synthesized.";
+    if (status !== "accepted")
+      return "Only accepted graph evidence can be synthesized.";
+    return null;
+  }
+
+  if (
+    ![
+      "strategy",
+      "claim",
+      "opportunity",
+      "assumption",
+      "risk",
+      "validation_experiment",
+    ].includes(node.kind)
+  ) {
+    return "This node kind is not a regeneration root.";
+  }
+  if (!node.stale) return "Only stale generated nodes can be regenerated.";
+  if (!isGeneratedNode(node))
+    return "This node has no generation lineage to retain.";
+  return null;
+}
+
+function generationSelectionProblem(
+  operation: GenerationOperation,
+  selected: GraphNode[],
+): string | null {
+  if (selected.length === 0) return "Select the required graph inputs.";
+  if (selected.some((node) => generationDisabledReason(node, operation))) {
+    return "Remove ineligible inputs before starting generation.";
+  }
+  if (operation === "generate_strategies") {
+    const goals = selected.filter((node) => node.kind === "goal").length;
+    const constraints = selected.filter(
+      (node) => node.kind === "constraint",
+    ).length;
+    return goals === 1 && constraints >= 1
+      ? null
+      : "Select exactly one goal and at least one constraint.";
+  }
+  if (operation === "research_evidence") {
+    return selected.length === 1 && selected[0].kind === "strategy"
+      ? null
+      : "Select exactly one accepted strategy.";
+  }
+  if (operation === "synthesize_opportunities") {
+    const strategies = selected.filter(
+      (node) => node.kind === "strategy",
+    ).length;
+    const claims = selected.filter((node) => node.kind === "claim").length;
+    return strategies === 1 && claims >= 1
+      ? null
+      : "Select exactly one accepted strategy and at least one accepted claim.";
+  }
+  return selected.length === 1
+    ? null
+    : "Select exactly one stale generated regeneration root.";
+}
+
+function activeRunStorageKey(canvasId: string): string {
+  return `proofgraph.activeGenerationRuns.${canvasId}`;
+}
+
+function isParallelRegenerationLineage(
+  edge: GraphEdge,
+  nodes: GraphNode[],
+): boolean {
+  if (edge.kind !== "evolves_into") return false;
+  const successor = nodes.find((node) => node.id === edge.target_node_id);
+  return (
+    successor?.metadata.regenerated_from_node_id === edge.source_node_id &&
+    successor.metadata.lineage_mode === "parallel"
+  );
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.code === "version_conflict") {
       return "This item changed elsewhere. Reload the canvas and try again.";
+    }
+    if (error.status === 429) {
+      return `${error.message} Choose Deterministic replay in the execution profile to continue without consuming hybrid quota.`;
     }
     return error.message;
   }
@@ -145,6 +328,7 @@ function upsertEdge(
 
 export function App() {
   const [runtimeState, setRuntimeState] = useState<RuntimeState>("checking");
+  const [demoSession, setDemoSession] = useState<DemoSession | null>(null);
   const [canvas, setCanvas] = useState<GraphCanvas | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -154,6 +338,18 @@ export function App() {
     null,
   );
   const [patchReviewOpen, setPatchReviewOpen] = useState(false);
+  const [patchReviewTarget, setPatchReviewTarget] = useState<string | null>(
+    null,
+  );
+  const [generationSelection, setGenerationSelection] = useState<Set<string>>(
+    new Set(),
+  );
+  const [generationProgress, dispatchGeneration] = useReducer(
+    generationProgressReducer,
+    INITIAL_GENERATION_PROGRESS,
+  );
+  const [branchComparison, setBranchComparison] =
+    useState<BranchComparison | null>(null);
   const [recentCanvasId, setRecentCanvasId] = useState<string | null>(() => {
     try {
       return localStorage.getItem("proofgraph.recentCanvasId");
@@ -162,11 +358,43 @@ export function App() {
     }
   });
   const dragState = useRef<DragState | null>(null);
+  const generationCursor = useRef(0);
+  const latestAutoPatchSequence = useRef(0);
+
+  const openPendingPatch = useCallback(
+    async (patchId: string, canvasId: string, canvasSequence: number) => {
+      try {
+        const patch = await getGraphPatch(patchId);
+        if (
+          patch.canvas_id === canvasId &&
+          patch.status === "pending" &&
+          canvasSequence >= latestAutoPatchSequence.current
+        ) {
+          latestAutoPatchSequence.current = canvasSequence;
+          setPatchReviewTarget(patchId);
+          setPatchReviewOpen(true);
+        }
+      } catch {
+        // The run card still exposes an explicit review action if lookup recovers.
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
     void checkRuntime()
-      .then(() => {
+      .then(async (runtime) => {
+        const demoRequested =
+          runtime.demo_mode ||
+          new URLSearchParams(window.location.search).get("demo") === "1";
+        if (demoRequested) {
+          const demo = await bootstrapDemo();
+          if (!active) return;
+          setDemoSession(demo.session);
+          setCanvas(demo.canvas);
+          rememberCanvas(demo.canvas.id);
+        }
         if (active) setRuntimeState("ready");
       })
       .catch(() => {
@@ -176,6 +404,131 @@ export function App() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    generationCursor.current = generationProgress.cursor;
+  }, [generationProgress.cursor]);
+
+  useEffect(() => {
+    const canvasId = canvas?.id ?? null;
+    generationCursor.current = 0;
+    latestAutoPatchSequence.current = 0;
+    dispatchGeneration({ type: "reset", canvasId });
+    if (!canvasId) return;
+
+    try {
+      const retained = JSON.parse(
+        localStorage.getItem(activeRunStorageKey(canvasId)) ?? "[]",
+      ) as unknown;
+      if (Array.isArray(retained)) {
+        for (const runId of retained.filter(
+          (value): value is string => typeof value === "string",
+        )) {
+          dispatchGeneration({ type: "track", runId });
+          void getGenerationRun(runId)
+            .then((run) => {
+              dispatchGeneration({ type: "reconcile", run });
+              if (run.ready_patch_id) {
+                void openPendingPatch(run.ready_patch_id, canvasId, 0);
+              }
+            })
+            .catch(() => {
+              // The authoritative SSE replay can still recover known events.
+            });
+        }
+      }
+    } catch {
+      // Corrupt or unavailable storage never blocks the canvas.
+    }
+
+    if (typeof EventSource === "undefined") {
+      dispatchGeneration({ type: "connection", connection: "disconnected" });
+      return;
+    }
+
+    let disposed = false;
+    let source: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryDelay = 500;
+
+    const connect = () => {
+      if (disposed) return;
+      dispatchGeneration({ type: "connection", connection: "connecting" });
+      const after = generationCursor.current;
+      source = new EventSource(
+        `/api/canvases/${encodeURIComponent(canvasId)}/events?after=${after}`,
+      );
+      source.onopen = () => {
+        retryDelay = 500;
+        dispatchGeneration({ type: "connection", connection: "connected" });
+      };
+      const receive = (message: MessageEvent<string>) => {
+        try {
+          const event = JSON.parse(message.data) as GenerationEvent;
+          if (
+            typeof event.run_id !== "string" ||
+            !Number.isSafeInteger(event.canvas_sequence) ||
+            event.canvas_sequence <= 0
+          ) {
+            return;
+          }
+          generationCursor.current = Math.max(
+            generationCursor.current,
+            event.canvas_sequence,
+          );
+          dispatchGeneration({ type: "event", event });
+          if (event.event_type === "patch.ready") {
+            const patchId = event.payload.patch_id;
+            if (typeof patchId === "string" && patchId) {
+              void openPendingPatch(patchId, canvasId, event.canvas_sequence);
+            }
+          }
+        } catch {
+          // Ignore malformed transport records; the durable cursor remains safe.
+        }
+      };
+      for (const eventType of GENERATION_EVENT_TYPES) {
+        source.addEventListener(eventType, receive as EventListener);
+      }
+      source.onerror = () => {
+        source?.close();
+        source = null;
+        dispatchGeneration({ type: "connection", connection: "disconnected" });
+        if (!disposed) {
+          reconnectTimer = setTimeout(connect, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, 10_000);
+        }
+      };
+    };
+
+    connect();
+    return () => {
+      disposed = true;
+      source?.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+  }, [canvas?.id, openPendingPatch]);
+
+  useEffect(() => {
+    if (!generationProgress.canvas_id) return;
+    const activeRunIds = Object.values(generationProgress.runs)
+      .filter(isRunPlaceholderVisible)
+      .map((run) => run.run_id);
+    try {
+      if (activeRunIds.length > 0) {
+        localStorage.setItem(
+          activeRunStorageKey(generationProgress.canvas_id),
+          JSON.stringify(activeRunIds),
+        );
+      } else {
+        localStorage.removeItem(
+          activeRunStorageKey(generationProgress.canvas_id),
+        );
+      }
+    } catch {
+      // Active-run recovery is an enhancement, not an authority boundary.
+    }
+  }, [generationProgress.canvas_id, generationProgress.runs]);
 
   const viewNodes = useMemo(
     () =>
@@ -195,6 +548,12 @@ export function App() {
     selection?.type === "edge"
       ? (canvas?.edges.find((edge) => edge.id === selection.id) ?? null)
       : null;
+  const generationRuns = Object.values(generationProgress.runs).sort(
+    (left, right) =>
+      right.last_canvas_sequence - left.last_canvas_sequence ||
+      left.run_id.localeCompare(right.run_id),
+  );
+  const visiblePlaceholders = generationRuns.filter(isRunPlaceholderVisible);
 
   function rememberCanvas(canvasId: string) {
     setRecentCanvasId(canvasId);
@@ -212,6 +571,7 @@ export function App() {
       const loaded = await getCanvas(canvasId.trim());
       setCanvas(loaded);
       setSelection(null);
+      setGenerationSelection(new Set());
       rememberCanvas(loaded.id);
     } catch (error) {
       setNotice({ tone: "error", message: errorMessage(error) });
@@ -227,8 +587,35 @@ export function App() {
       const created = await createCanvas(title);
       setCanvas(created);
       setSelection(null);
+      setGenerationSelection(new Set());
       rememberCanvas(created.id);
       setNotice({ tone: "success", message: "Canvas created." });
+    } catch (error) {
+      setNotice({ tone: "error", message: errorMessage(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleResetDemo() {
+    setBusy("reset-demo");
+    setNotice(null);
+    try {
+      const demo = await resetDemo();
+      setDemoSession(demo.session);
+      setCanvas(demo.canvas);
+      setSelection(null);
+      setDialog(null);
+      setDeleteConflict(null);
+      setPatchReviewOpen(false);
+      setPatchReviewTarget(null);
+      setGenerationSelection(new Set());
+      setBranchComparison(null);
+      rememberCanvas(demo.canvas.id);
+      setNotice({
+        tone: "success",
+        message: "Demo reset to a fresh isolated copy of the starting canvas.",
+      });
     } catch (error) {
       setNotice({ tone: "error", message: errorMessage(error) });
     } finally {
@@ -274,6 +661,184 @@ export function App() {
     } finally {
       setBusy(null);
     }
+  }
+
+  async function handleStartGeneration(
+    operation: GenerationOperation,
+    selectedNodeIds: string[],
+    executionProfileId: "demo_hybrid_v1" | "replay_v1",
+    regenerationScope: "node" | "branch" | null,
+    instruction: string | null = null,
+  ) {
+    if (!canvas) return;
+    const selected = canvas.nodes.filter((node) =>
+      selectedNodeIds.includes(node.id),
+    );
+    const problem = generationSelectionProblem(operation, selected);
+    if (problem) {
+      setNotice({ tone: "error", message: problem });
+      return;
+    }
+
+    setBusy("start-generation");
+    setNotice(null);
+    try {
+      const request: GenerationRunRequest = {
+        operation,
+        selected_node_ids: selected.map((node) => node.id),
+        expected_node_versions: Object.fromEntries(
+          selected.map((node) => [node.id, node.version]),
+        ),
+        instruction,
+        execution_profile_id: executionProfileId,
+        idempotency_key: operationKey(),
+        regeneration_scope:
+          operation === "regenerate_stale" ? regenerationScope : null,
+      };
+      const run = await createGenerationRun(canvas.id, request);
+      dispatchGeneration({
+        type: "track",
+        runId: run.run_id,
+        status: run.status,
+      });
+      if (demoSession && executionProfileId === "demo_hybrid_v1") {
+        setDemoSession((current) =>
+          current
+            ? {
+                ...current,
+                hybrid_run_count: Math.min(
+                  current.hybrid_run_count + 1,
+                  current.hybrid_run_limit,
+                ),
+              }
+            : current,
+        );
+      }
+      setGenerationSelection(new Set());
+      setNotice({
+        tone: "success",
+        message: "Generation queued. Progress is shown on this canvas.",
+      });
+    } catch (error) {
+      setNotice({ tone: "error", message: errorMessage(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleCancelGeneration(run: RunProgress) {
+    setBusy(`cancel-run:${run.run_id}`);
+    setNotice(null);
+    try {
+      const updated = await cancelGenerationRun(run.run_id);
+      dispatchGeneration({ type: "reconcile", run: updated });
+      setNotice({
+        tone: "success",
+        message:
+          updated.cancellation_state === "cancelled"
+            ? "Generation cancelled. The canvas was unchanged."
+            : "Cancellation requested. The worker will stop at a safe boundary.",
+      });
+    } catch (error) {
+      setNotice({ tone: "error", message: errorMessage(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRetryGeneration(run: RunProgress) {
+    setBusy(`retry-run:${run.run_id}`);
+    setNotice(null);
+    try {
+      const updated = await retryGenerationRun(run.run_id);
+      dispatchGeneration({ type: "reconcile", run: updated });
+      setNotice({
+        tone: "success",
+        message: "Safe retry queued from the first incomplete checkpoint.",
+      });
+    } catch (error) {
+      setNotice({ tone: "error", message: errorMessage(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRejectEvidence(node: GraphNode) {
+    if (!canvas) return;
+    setBusy("reject-evidence");
+    setNotice(null);
+    try {
+      await applyOperation<EvidenceActionResult>(canvas.id, {
+        op: "REJECT_EVIDENCE",
+        operation_key: operationKey(),
+        node_id: node.id,
+        expected_version: node.version,
+      });
+      setCanvas(await getCanvas(canvas.id));
+      setNotice({
+        tone: "success",
+        message:
+          "Evidence rejected through an audited operation; affected descendants were marked stale.",
+      });
+    } catch (error) {
+      setNotice({ tone: "error", message: errorMessage(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleReplaceAssumption(
+    node: GraphNode,
+    replacement: { title: string; body: string },
+  ) {
+    if (!canvas) return;
+    setBusy("replace-assumption");
+    setNotice(null);
+    try {
+      await applyOperation<AssumptionReplacementResult>(canvas.id, {
+        op: "REPLACE_ASSUMPTION",
+        operation_key: operationKey(),
+        node_id: node.id,
+        expected_version: node.version,
+        replacement,
+      });
+      setCanvas(await getCanvas(canvas.id));
+      setNotice({
+        tone: "success",
+        message:
+          "Assumption replaced through an audited operation; its opportunity family is now stale.",
+      });
+    } catch (error) {
+      setNotice({ tone: "error", message: errorMessage(error) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function handleCompareBranches(node: GraphNode) {
+    if (!canvas) return;
+    const lineageEdges = canvas.edges.filter(
+      (edge) =>
+        isParallelRegenerationLineage(edge, canvas.nodes) &&
+        (edge.source_node_id === node.id || edge.target_node_id === node.id),
+    );
+    const peerIds = new Set(
+      lineageEdges.map((edge) =>
+        edge.source_node_id === node.id
+          ? edge.target_node_id
+          : edge.source_node_id,
+      ),
+    );
+    const peers = canvas.nodes.filter((candidate) => peerIds.has(candidate.id));
+    if (peers.length === 0) {
+      setNotice({
+        tone: "error",
+        message:
+          "Branch comparison requires a retained predecessor or successor linked by evolves-into lineage.",
+      });
+      return;
+    }
+    setBranchComparison({ selected: node, peers, lineageEdges });
   }
 
   async function handleAddNode(input: NewNodeInput) {
@@ -333,7 +898,13 @@ export function App() {
         expected_version: node.version,
         changes,
       });
-      setCanvas((current) => (current ? upsertNode(current, result) : current));
+      if ((result.stale_node_ids?.length ?? 0) > 0) {
+        setCanvas(await getCanvas(canvas.id));
+      } else {
+        setCanvas((current) =>
+          current ? upsertNode(current, result) : current,
+        );
+      }
       setNotice({ tone: "success", message: "Node saved." });
     } catch (error) {
       setNotice({ tone: "error", message: errorMessage(error) });
@@ -353,17 +924,21 @@ export function App() {
         node_id: node.id,
         expected_version: node.version,
       });
-      setCanvas((current) =>
-        current
-          ? {
-              ...current,
-              revision: result.canvas_revision,
-              nodes: current.nodes.filter(
-                (item) => item.id !== result.deleted_node_id,
-              ),
-            }
-          : current,
-      );
+      if ((result.stale_node_ids?.length ?? 0) > 0) {
+        setCanvas(await getCanvas(canvas.id));
+      } else {
+        setCanvas((current) =>
+          current
+            ? {
+                ...current,
+                revision: result.canvas_revision,
+                nodes: current.nodes.filter(
+                  (item) => item.id !== result.deleted_node_id,
+                ),
+              }
+            : current,
+        );
+      }
       setSelection(null);
       setNotice({ tone: "success", message: "Node deleted." });
     } catch (error) {
@@ -444,7 +1019,13 @@ export function App() {
           kind: input.kind,
         },
       });
-      setCanvas((current) => (current ? upsertEdge(current, result) : current));
+      if ((result.stale_node_ids?.length ?? 0) > 0) {
+        setCanvas(await getCanvas(canvas.id));
+      } else {
+        setCanvas((current) =>
+          current ? upsertEdge(current, result) : current,
+        );
+      }
       setSelection({ type: "edge", id: result.edge.id });
       setDialog(null);
       setNotice({ tone: "success", message: "Connection added." });
@@ -489,17 +1070,21 @@ export function App() {
         edge_id: edge.id,
         expected_version: edge.version,
       });
-      setCanvas((current) =>
-        current
-          ? {
-              ...current,
-              revision: result.canvas_revision,
-              edges: current.edges.filter(
-                (item) => item.id !== result.deleted_edge_id,
-              ),
-            }
-          : current,
-      );
+      if ((result.stale_node_ids?.length ?? 0) > 0) {
+        setCanvas(await getCanvas(canvas.id));
+      } else {
+        setCanvas((current) =>
+          current
+            ? {
+                ...current,
+                revision: result.canvas_revision,
+                edges: current.edges.filter(
+                  (item) => item.id !== result.deleted_edge_id,
+                ),
+              }
+            : current,
+        );
+      }
       setSelection(null);
       setNotice({ tone: "success", message: "Connection deleted." });
     } catch (error) {
@@ -695,6 +1280,12 @@ export function App() {
           <span>Revision {canvas.revision}</span>
           <span>{canvas.nodes.length} nodes</span>
           <span>{canvas.edges.length} edges</span>
+          {demoSession && (
+            <span>
+              Hybrid {demoSession.hybrid_run_count}/
+              {demoSession.hybrid_run_limit}
+            </span>
+          )}
         </div>
       </header>
 
@@ -733,21 +1324,36 @@ export function App() {
         <button
           type="button"
           className="toolbar-button"
-          onClick={() => setPatchReviewOpen(true)}
+          onClick={() => {
+            setPatchReviewTarget(null);
+            setPatchReviewOpen(true);
+          }}
         >
           Review patch
         </button>
-        <button
-          type="button"
-          className="toolbar-button toolbar-button--end"
-          onClick={() => {
-            setCanvas(null);
-            setSelection(null);
-            setNotice(null);
-          }}
-        >
-          Open another canvas
-        </button>
+        {demoSession ? (
+          <button
+            type="button"
+            className="toolbar-button toolbar-button--end"
+            disabled={busy !== null}
+            title={`Session expires ${new Date(demoSession.expires_at).toLocaleString()}`}
+            onClick={() => void handleResetDemo()}
+          >
+            Reset demo
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="toolbar-button toolbar-button--end"
+            onClick={() => {
+              setCanvas(null);
+              setSelection(null);
+              setNotice(null);
+            }}
+          >
+            Open another canvas
+          </button>
+        )}
       </section>
 
       {notice && (
@@ -770,6 +1376,16 @@ export function App() {
                 if (event.target === event.currentTarget) setSelection(null);
               }}
             >
+              {visiblePlaceholders.length > 0 && (
+                <div
+                  className="generation-overlays"
+                  aria-label="Generation in progress"
+                >
+                  {visiblePlaceholders.map((run) => (
+                    <GenerationOverlay key={run.run_id} run={run} />
+                  ))}
+                </div>
+              )}
               {canvas.edges.map((edge) => (
                 <EdgeConnection
                   key={edge.id}
@@ -824,9 +1440,23 @@ export function App() {
               key={`${selectedNode.id}:${selectedNode.version}`}
               node={selectedNode}
               nodes={canvas.nodes}
+              edges={canvas.edges}
               disabled={busy !== null}
               onSave={(input) => void handleSaveNode(selectedNode, input)}
               onDelete={() => void handleDeleteNode(selectedNode)}
+              onRejectEvidence={() => void handleRejectEvidence(selectedNode)}
+              onReplaceAssumption={(replacement) =>
+                void handleReplaceAssumption(selectedNode, replacement)
+              }
+              onCompareBranches={() => handleCompareBranches(selectedNode)}
+              onRegenerate={(scope) =>
+                void handleStartGeneration(
+                  "regenerate_stale",
+                  [selectedNode.id],
+                  "demo_hybrid_v1",
+                  scope,
+                )
+              }
             />
           )}
           {selectedEdge && (
@@ -868,6 +1498,37 @@ export function App() {
               </div>
             </div>
           )}
+          <GenerationPanel
+            nodes={canvas.nodes}
+            selectedNodeIds={generationSelection}
+            runs={generationRuns}
+            connection={generationProgress.connection}
+            disabled={busy !== null}
+            onToggleNode={(nodeId, checked) =>
+              setGenerationSelection((current) => {
+                const next = new Set(current);
+                if (checked) next.add(nodeId);
+                else next.delete(nodeId);
+                return next;
+              })
+            }
+            onClearSelection={() => setGenerationSelection(new Set())}
+            onStart={(operation, profile, scope, instruction) =>
+              void handleStartGeneration(
+                operation,
+                [...generationSelection],
+                profile,
+                scope,
+                instruction,
+              )
+            }
+            onCancel={(run) => void handleCancelGeneration(run)}
+            onRetry={(run) => void handleRetryGeneration(run)}
+            onReviewPatch={(patchId) => {
+              setPatchReviewTarget(patchId);
+              setPatchReviewOpen(true);
+            }}
+          />
         </aside>
       </div>
 
@@ -890,8 +1551,20 @@ export function App() {
       {patchReviewOpen && (
         <PatchReviewDialog
           canvasId={canvas.id}
-          onClose={() => setPatchReviewOpen(false)}
+          initialPatchId={patchReviewTarget}
+          onClose={() => {
+            setPatchReviewOpen(false);
+            setPatchReviewTarget(null);
+          }}
           onApplied={() => void refreshCurrentCanvas()}
+        />
+      )}
+      {branchComparison && (
+        <BranchComparisonDialog
+          comparison={branchComparison}
+          nodes={canvas.nodes}
+          edges={canvas.edges}
+          onClose={() => setBranchComparison(null)}
         />
       )}
       {deleteConflict && (
@@ -1052,11 +1725,23 @@ function NodeCard({
   onPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPointerCancel: (event: ReactPointerEvent<HTMLButtonElement>) => void;
 }) {
+  const rejected = reviewStatus(node) === "rejected";
   return (
     <article
-      className={`graph-node graph-node--${node.kind}${selected ? " graph-node--selected" : ""}${node.stale ? " graph-node--stale" : ""}`}
+      className={`graph-node graph-node--${node.kind}${selected ? " graph-node--selected" : ""}${node.stale ? " graph-node--stale" : ""}${rejected ? " graph-node--rejected" : ""}`}
       style={{ left: node.position.x, top: node.position.y }}
       onClick={onSelect}
+      onKeyDown={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          (event.key === "Enter" || event.key === " ")
+        ) {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      tabIndex={0}
+      aria-label={`${NODE_KIND_LABELS[node.kind]}: ${node.title}${rejected ? ". Rejected evidence." : ""}`}
       data-testid={`node-${node.id}`}
     >
       <button
@@ -1083,6 +1768,16 @@ function NodeCard({
         {node.stale && (
           <span className="node-status node-status--stale">
             Needs regeneration
+          </span>
+        )}
+        {rejected && (
+          <span className="node-status node-status--rejected">
+            Rejected evidence
+          </span>
+        )}
+        {node.kind === "source" && node.metadata.cache_hit === true && (
+          <span className="node-status node-status--cached">
+            Previously retrieved
           </span>
         )}
       </div>
@@ -1142,18 +1837,37 @@ function EdgeConnection({
   );
 }
 
+const OPPORTUNITY_DIMENSIONS = [
+  ["evidence_strength", "Evidence strength"],
+  ["novelty", "Novelty"],
+  ["builder_fit", "Builder fit"],
+  ["technical_feasibility", "Technical feasibility"],
+  ["distribution_clarity", "Distribution clarity"],
+  ["operational_burden", "Operational burden"],
+] as const;
+
 function NodeInspector({
   node,
   nodes,
+  edges,
   disabled,
   onSave,
   onDelete,
+  onRejectEvidence,
+  onReplaceAssumption,
+  onCompareBranches,
+  onRegenerate,
 }: {
   node: GraphNode;
   nodes: GraphNode[];
+  edges: GraphEdge[];
   disabled: boolean;
   onSave: (input: NodeEditInput) => void;
   onDelete: () => void;
+  onRejectEvidence: () => void;
+  onReplaceAssumption: (replacement: { title: string; body: string }) => void;
+  onCompareBranches: () => void;
+  onRegenerate: (scope: "node" | "branch") => void;
 }) {
   const initialScope =
     node.metadata.context_scope === "branch" ? "branch" : "global";
@@ -1161,6 +1875,41 @@ function NodeInspector({
   const branchRoots = nodes.filter(
     (candidate) => candidate.id !== node.id && isBranchRoot(candidate),
   );
+  const status = reviewStatus(node);
+  const evidenceReason = !["source", "claim"].includes(node.kind)
+    ? "Select an accepted source or claim to reject evidence."
+    : status !== "accepted"
+      ? status === "rejected"
+        ? "This evidence is already rejected."
+        : "Only previously accepted evidence can be rejected."
+      : null;
+  const assumptionOwners = edges.filter(
+    (edge) =>
+      edge.kind === "derived_from" &&
+      edge.target_node_id === node.id &&
+      nodes.some(
+        (candidate) =>
+          candidate.id === edge.source_node_id &&
+          candidate.kind === "opportunity",
+      ),
+  );
+  const assumptionReason =
+    node.kind !== "assumption"
+      ? "Select an accepted assumption to replace it."
+      : status !== "accepted"
+        ? "Only an accepted assumption can be replaced."
+        : assumptionOwners.length !== 1
+          ? "Assumption replacement requires exactly one opportunity-family owner."
+          : null;
+  const comparisonReason = edges.some(
+    (edge) =>
+      isParallelRegenerationLineage(edge, nodes) &&
+      (edge.source_node_id === node.id || edge.target_node_id === node.id),
+  )
+    ? null
+    : "No retained predecessor or successor lineage is available for comparison.";
+  const regenerationReason = generationDisabledReason(node, "regenerate_stale");
+  const rejectionOperationId = node.metadata.rejected_by_operation_id;
   return (
     <div>
       <div className="inspector-heading">
@@ -1258,6 +2007,142 @@ function NodeInspector({
             </label>
           </fieldset>
         )}
+
+        {node.kind === "opportunity" &&
+          typeof node.metadata.dimensions === "object" &&
+          node.metadata.dimensions !== null && (
+            <section
+              className="applied-opportunity-quality"
+              aria-label="Applied opportunity quality"
+            >
+              <h3>Opportunity quality</h3>
+              <div className="quality-grid">
+                {OPPORTUNITY_DIMENSIONS.map(([key, label]) => {
+                  const dimensions = node.metadata.dimensions as Record<
+                    string,
+                    unknown
+                  >;
+                  const value = dimensions[key];
+                  if (typeof value !== "object" || value === null) return null;
+                  const assessment = value as Record<string, unknown>;
+                  return (
+                    <section key={key}>
+                      <span>{label}</span>
+                      <strong>
+                        {String(assessment.rating ?? "Not rated")}
+                      </strong>
+                      <p>{String(assessment.rationale ?? "")}</p>
+                    </section>
+                  );
+                })}
+              </div>
+              <div className="rationale-grid">
+                <section>
+                  <span>Distribution rationale</span>
+                  <p>{String(node.metadata.distribution_rationale ?? "")}</p>
+                </section>
+                <section>
+                  <span>Defensibility rationale</span>
+                  <p>{String(node.metadata.defensibility ?? "")}</p>
+                </section>
+              </div>
+            </section>
+          )}
+
+        <section
+          className="semantic-actions"
+          aria-label="Audited graph actions"
+        >
+          <div>
+            <h3>Audited graph actions</h3>
+            <p>
+              These actions preserve operation history and dependency semantics.
+            </p>
+          </div>
+          {(["source", "claim"].includes(node.kind) ||
+            status === "rejected") && (
+            <div className="semantic-action">
+              <button
+                type="button"
+                className="danger-button"
+                disabled={disabled || evidenceReason !== null}
+                aria-describedby="reject-evidence-reason"
+                onClick={onRejectEvidence}
+              >
+                Reject accepted evidence
+              </button>
+              {evidenceReason && (
+                <small id="reject-evidence-reason">{evidenceReason}</small>
+              )}
+              {status === "rejected" &&
+                (typeof rejectionOperationId === "number" ||
+                  typeof rejectionOperationId === "string") && (
+                  <small>Audit operation #{String(rejectionOperationId)}</small>
+                )}
+            </div>
+          )}
+          {node.kind === "assumption" && (
+            <div className="semantic-action">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={disabled || assumptionReason !== null}
+                aria-describedby="replace-assumption-reason"
+                onClick={(event) => {
+                  const form = event.currentTarget.form;
+                  if (!form) return;
+                  const values = new FormData(form);
+                  onReplaceAssumption({
+                    title: String(values.get("title") ?? "").trim(),
+                    body: String(values.get("body") ?? ""),
+                  });
+                }}
+              >
+                Replace assumption
+              </button>
+              {assumptionReason && (
+                <small id="replace-assumption-reason">{assumptionReason}</small>
+              )}
+            </div>
+          )}
+          <div className="semantic-action">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={disabled || comparisonReason !== null}
+              aria-describedby="compare-branch-reason"
+              onClick={onCompareBranches}
+            >
+              Compare retained branches
+            </button>
+            {comparisonReason && (
+              <small id="compare-branch-reason">{comparisonReason}</small>
+            )}
+          </div>
+          <div className="semantic-action semantic-action--regenerate">
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={disabled || regenerationReason !== null}
+              aria-describedby="regenerate-branch-reason"
+              onClick={() => onRegenerate("node")}
+            >
+              Regenerate node
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={disabled || regenerationReason !== null}
+              aria-describedby="regenerate-branch-reason"
+              onClick={() => onRegenerate("branch")}
+            >
+              Regenerate branch
+            </button>
+            {regenerationReason && (
+              <small id="regenerate-branch-reason">{regenerationReason}</small>
+            )}
+          </div>
+        </section>
 
         <div className="inspector-actions">
           <button type="submit" className="primary-button" disabled={disabled}>
@@ -1587,14 +2472,410 @@ function DeleteConflictDialog({
   );
 }
 
-const OPPORTUNITY_DIMENSIONS = [
-  ["evidence_strength", "Evidence strength"],
-  ["novelty", "Novelty"],
-  ["builder_fit", "Builder fit"],
-  ["technical_feasibility", "Technical feasibility"],
-  ["distribution_clarity", "Distribution clarity"],
-  ["operational_burden", "Operational burden"],
-] as const;
+function runStatusLabel(run: RunProgress): string {
+  if (run.cancellation_state === "requested") return "Cancelling safely";
+  if (run.status === "queued" && run.attempt > 0) return "Retry queued";
+  if (run.status === "running" && run.current_stage) {
+    return run.current_stage.replaceAll("_", " ");
+  }
+  return run.status.replaceAll("_", " ");
+}
+
+function GenerationOverlay({ run }: { run: RunProgress }) {
+  return (
+    <section
+      className="generation-overlay"
+      data-testid={`generation-overlay-${run.run_id}`}
+      aria-live="polite"
+    >
+      <header>
+        <span className="generation-overlay__pulse" aria-hidden="true" />
+        <div>
+          <strong>Generation in progress</strong>
+          <small>
+            Run {run.run_id.slice(0, 8)} · {runStatusLabel(run)}
+          </small>
+        </div>
+      </header>
+      <p>
+        This is a non-persisted overlay. It is not an idea or authoritative
+        graph node.
+      </p>
+      {(run.provisional_sources.length > 0 ||
+        run.provisional_claims.length > 0) && (
+        <div className="provisional-evidence">
+          <span className="provisional-badge">Provisional evidence</span>
+          {run.provisional_sources.map((source) => (
+            <article key={source.source_id}>
+              <strong>{source.url ?? source.source_id}</strong>
+              <p>
+                {source.sanitized_excerpt ??
+                  "Source found; retained details are still being validated."}
+              </p>
+              {source.cache_hit && <small>Previously retrieved</small>}
+            </article>
+          ))}
+          {run.provisional_claims.map((claim) => (
+            <article key={claim.claim_id}>
+              <strong>{claim.claim ?? claim.claim_id}</strong>
+              <p>
+                {[claim.classification, claim.strength]
+                  .filter(Boolean)
+                  .join(" · ") || "Validated extraction batch"}
+              </p>
+            </article>
+          ))}
+          <small>Not selectable until its evidence patch is accepted.</small>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function GenerationPanel({
+  nodes,
+  selectedNodeIds,
+  runs,
+  connection,
+  disabled,
+  onToggleNode,
+  onClearSelection,
+  onStart,
+  onCancel,
+  onRetry,
+  onReviewPatch,
+}: {
+  nodes: GraphNode[];
+  selectedNodeIds: Set<string>;
+  runs: RunProgress[];
+  connection: "idle" | "connecting" | "connected" | "disconnected";
+  disabled: boolean;
+  onToggleNode: (nodeId: string, checked: boolean) => void;
+  onClearSelection: () => void;
+  onStart: (
+    operation: GenerationOperation,
+    profile: "demo_hybrid_v1" | "replay_v1",
+    scope: "node" | "branch" | null,
+    instruction: string | null,
+  ) => void;
+  onCancel: (run: RunProgress) => void;
+  onRetry: (run: RunProgress) => void;
+  onReviewPatch: (patchId: string) => void;
+}) {
+  const [operation, setOperation] = useState<GenerationOperation>(
+    "generate_strategies",
+  );
+  const [profile, setProfile] = useState<"demo_hybrid_v1" | "replay_v1">(
+    "demo_hybrid_v1",
+  );
+  const [scope, setScope] = useState<"node" | "branch">("node");
+  const [instruction, setInstruction] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const selected = nodes.filter((node) => selectedNodeIds.has(node.id));
+  const problem = generationSelectionProblem(operation, selected);
+  const controlsVisible = expanded || runs.length > 0;
+
+  return (
+    <section className="generation-panel" aria-labelledby="generation-title">
+      <header>
+        <div>
+          <p className="inspector-kicker">Generation</p>
+          <h2 id="generation-title">Build the next graph patch</h2>
+        </div>
+        <span
+          className={`stream-status stream-status--${connection}`}
+          aria-label={`Progress stream ${connection}`}
+        >
+          {connection}
+        </span>
+      </header>
+      <button
+        type="button"
+        className="quiet-button"
+        aria-expanded={controlsVisible}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        {controlsVisible
+          ? "Hide generation controls"
+          : "Open generation controls"}
+      </button>
+      {controlsVisible && (
+        <>
+          {connection === "disconnected" && (
+            <p className="field-hint" role="status">
+              Progress is reconnecting from the last committed canvas cursor.
+              Graph edits remain available.
+            </p>
+          )}
+          <div className="generation-controls">
+            <label htmlFor="generation-operation">Operation</label>
+            <select
+              id="generation-operation"
+              value={operation}
+              disabled={disabled}
+              onChange={(event) => {
+                setOperation(event.target.value as GenerationOperation);
+                onClearSelection();
+              }}
+            >
+              <option value="generate_strategies">Generate strategies</option>
+              <option value="research_evidence">Research evidence</option>
+              <option value="synthesize_opportunities">
+                Synthesize opportunities
+              </option>
+              <option value="regenerate_stale">Regenerate stale branch</option>
+            </select>
+            <label htmlFor="generation-profile">Execution profile</label>
+            <select
+              id="generation-profile"
+              value={profile}
+              disabled={disabled}
+              onChange={(event) =>
+                setProfile(event.target.value as "demo_hybrid_v1" | "replay_v1")
+              }
+            >
+              <option value="demo_hybrid_v1">Hybrid live reasoning</option>
+              <option value="replay_v1">Deterministic replay</option>
+            </select>
+            <p className="field-hint">
+              {profile === "demo_hybrid_v1"
+                ? "Canonical retrieved evidence with live GPT-5.6 synthesis, critique, and patch reasoning."
+                : "Fully deterministic fixture replay; no live model reasoning is used."}
+            </p>
+            {operation === "regenerate_stale" && (
+              <>
+                <label htmlFor="regeneration-scope">Regeneration scope</label>
+                <select
+                  id="regeneration-scope"
+                  value={scope}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    setScope(event.target.value as "node" | "branch")
+                  }
+                >
+                  <option value="node">Selected production unit</option>
+                  <option value="branch">Retained stale branch</option>
+                </select>
+              </>
+            )}
+            <label htmlFor="generation-instruction">Optional instruction</label>
+            <textarea
+              id="generation-instruction"
+              rows={2}
+              maxLength={4000}
+              value={instruction}
+              disabled={disabled}
+              onChange={(event) => setInstruction(event.target.value)}
+            />
+          </div>
+          <fieldset className="generation-selection">
+            <legend>Explicit graph inputs</legend>
+            {nodes.length === 0 && <p>Add graph inputs before generating.</p>}
+            {nodes.map((node) => {
+              const reason = generationDisabledReason(node, operation);
+              const reasonId = `generation-reason-${node.id}`;
+              return (
+                <label key={node.id} className="generation-selection__item">
+                  <input
+                    type="checkbox"
+                    checked={selectedNodeIds.has(node.id)}
+                    disabled={disabled || reason !== null}
+                    aria-describedby={reason ? reasonId : undefined}
+                    onChange={(event) =>
+                      onToggleNode(node.id, event.target.checked)
+                    }
+                  />
+                  <span>
+                    <strong>{node.title}</strong>
+                    <small>{NODE_KIND_LABELS[node.kind]}</small>
+                    {reason && <small id={reasonId}>{reason}</small>}
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={disabled || problem !== null}
+            aria-describedby="generation-selection-problem"
+            onClick={() =>
+              onStart(
+                operation,
+                profile,
+                operation === "regenerate_stale" ? scope : null,
+                instruction.trim() || null,
+              )
+            }
+          >
+            Start generation
+          </button>
+          {problem && (
+            <p id="generation-selection-problem" className="field-hint">
+              {problem}
+            </p>
+          )}
+
+          {runs.length > 0 && (
+            <div className="run-list" aria-label="Generation runs">
+              {runs.map((run) => (
+                <article
+                  key={run.run_id}
+                  className={`run-card run-card--${run.status}`}
+                >
+                  <header>
+                    <strong>{runStatusLabel(run)}</strong>
+                    <code>{run.run_id.slice(0, 8)}</code>
+                  </header>
+                  {run.error && (
+                    <p role="alert">
+                      {run.error.stage ? `${run.error.stage}: ` : ""}
+                      {run.error.message}
+                    </p>
+                  )}
+                  <div className="run-card__actions">
+                    {isRunPlaceholderVisible(run) && (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={
+                          disabled || run.cancellation_state === "requested"
+                        }
+                        onClick={() => onCancel(run)}
+                      >
+                        {run.cancellation_state === "requested"
+                          ? "Cancelling"
+                          : "Cancel"}
+                      </button>
+                    )}
+                    {canRetryRun(run) && (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={disabled}
+                        onClick={() => onRetry(run)}
+                      >
+                        Retry safely
+                      </button>
+                    )}
+                    {run.patch_id && (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={disabled}
+                        onClick={() => onReviewPatch(run.patch_id!)}
+                      >
+                        Review patch
+                      </button>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function BranchComparisonDialog({
+  comparison,
+  nodes,
+  edges,
+  onClose,
+}: {
+  comparison: BranchComparison;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  onClose: () => void;
+}) {
+  const [peerId, setPeerId] = useState(comparison.peers[0]?.id ?? "");
+  const peer = comparison.peers.find((candidate) => candidate.id === peerId);
+  if (!peer) return null;
+  const related = (rootId: string) => {
+    const ids = new Set(
+      edges
+        .filter(
+          (edge) =>
+            edge.kind !== "evolves_into" &&
+            (edge.source_node_id === rootId || edge.target_node_id === rootId),
+        )
+        .map((edge) =>
+          edge.source_node_id === rootId
+            ? edge.target_node_id
+            : edge.source_node_id,
+        ),
+    );
+    return nodes.filter((node) => ids.has(node.id));
+  };
+  const branches = [comparison.selected, peer];
+
+  return (
+    <Modal title="Compare retained branches" onClose={onClose} wide>
+      {comparison.peers.length > 1 && (
+        <div className="comparison-peer-picker">
+          <label htmlFor="comparison-peer">Compare with</label>
+          <select
+            id="comparison-peer"
+            value={peerId}
+            onChange={(event) => setPeerId(event.target.value)}
+          >
+            {comparison.peers.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.title}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <p className="field-hint">
+        Both branches remain authoritative retained graph history. Comparison is
+        anchored by audited <code>evolves_into</code> lineage.
+      </p>
+      <div className="branch-comparison">
+        {branches.map((branch, index) => (
+          <section key={branch.id}>
+            <span>{index === 0 ? "Selected branch" : "Lineage peer"}</span>
+            <h3>{branch.title}</h3>
+            <p>{branch.body || "No branch summary."}</p>
+            <dl>
+              <div>
+                <dt>Kind</dt>
+                <dd>{NODE_KIND_LABELS[branch.kind]}</dd>
+              </div>
+              <div>
+                <dt>Version</dt>
+                <dd>{branch.version}</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>{branch.stale ? "Retained stale" : "Current"}</dd>
+              </div>
+            </dl>
+            <h4>Related retained nodes</h4>
+            <ul>
+              {related(branch.id).map((node) => (
+                <li key={node.id}>
+                  {NODE_KIND_LABELS[node.kind]} · {node.title}
+                </li>
+              ))}
+              {related(branch.id).length === 0 && <li>None</li>}
+            </ul>
+            <details>
+              <summary>Branch metadata</summary>
+              <pre>{JSON.stringify(branch.metadata, null, 2)}</pre>
+            </details>
+          </section>
+        ))}
+      </div>
+      <p className="field-hint">
+        Lineage edge{comparison.lineageEdges.length === 1 ? "" : "s"}:{" "}
+        {comparison.lineageEdges.map((edge) => edge.id).join(", ")}
+      </p>
+    </Modal>
+  );
+}
 
 function displayValue(value: unknown): string {
   if (typeof value === "string") return value;
@@ -1604,10 +2885,12 @@ function displayValue(value: unknown): string {
 
 function PatchReviewDialog({
   canvasId,
+  initialPatchId,
   onClose,
   onApplied,
 }: {
   canvasId: string;
+  initialPatchId: string | null;
   onClose: () => void;
   onApplied: () => void;
 }) {
@@ -1642,25 +2925,34 @@ function PatchReviewDialog({
     [patch],
   );
 
-  async function loadPatch(patchId: string) {
-    setBusyAction("load");
-    setMessage(null);
-    try {
-      const loaded = await getGraphPatch(patchId);
-      if (loaded.canvas_id !== canvasId) {
-        throw new Error("This patch belongs to a different canvas.");
+  const loadPatch = useCallback(
+    async (patchId: string) => {
+      setBusyAction("load");
+      setMessage(null);
+      try {
+        const loaded = await getGraphPatch(patchId);
+        if (loaded.canvas_id !== canvasId) {
+          throw new Error("This patch belongs to a different canvas.");
+        }
+        setPatch(loaded);
+        setSelectedOperationIds(
+          new Set(loaded.operations.map((operation) => operation.operation_id)),
+        );
+        setLinkedRunId(loaded.regenerated_by_run_id);
+      } catch (error) {
+        setMessage({ tone: "error", message: errorMessage(error) });
+      } finally {
+        setBusyAction(null);
       }
-      setPatch(loaded);
-      setSelectedOperationIds(
-        new Set(loaded.operations.map((operation) => operation.operation_id)),
-      );
-      setLinkedRunId(loaded.regenerated_by_run_id);
-    } catch (error) {
-      setMessage({ tone: "error", message: errorMessage(error) });
-    } finally {
-      setBusyAction(null);
-    }
-  }
+    },
+    [canvasId],
+  );
+
+  useEffect(() => {
+    if (!initialPatchId) return;
+    const timer = setTimeout(() => void loadPatch(initialPatchId), 0);
+    return () => clearTimeout(timer);
+  }, [initialPatchId, loadPatch]);
 
   function toggleOperation(operationId: string, checked: boolean) {
     if (!patch || patch.status !== "pending") return;
@@ -1794,7 +3086,7 @@ function PatchReviewDialog({
           <input
             id="patch-review-id"
             name="patchId"
-            defaultValue={patch?.patch_id ?? ""}
+            defaultValue={initialPatchId ?? patch?.patch_id ?? ""}
             placeholder="Paste a ready patch ID"
             required
             autoFocus

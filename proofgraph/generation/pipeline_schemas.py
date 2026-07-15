@@ -499,6 +499,7 @@ class PatchNode(PipelineModel):
     title: ShortText
     body: str | None = Field(default=None, max_length=4_000)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    branch_root_node_id: EntityId | None = None
     position: PatchPosition | None = None
 
     @model_validator(mode="after")
@@ -513,6 +514,14 @@ class PatchNode(PipelineModel):
             or provenance != sorted(set(provenance))
         ):
             raise ValueError("provenance_node_ids must be sorted and deduplicated strings")
+        scope = self.metadata.get("context_scope")
+        if self.kind != "constraint" and self.branch_root_node_id is not None:
+            raise ValueError("only constraint nodes may declare branch_root_node_id")
+        if self.kind == "constraint":
+            if scope == "branch" and self.branch_root_node_id is None:
+                raise ValueError("branch constraints require branch_root_node_id")
+            if scope == "global" and self.branch_root_node_id is not None:
+                raise ValueError("global constraints may not declare branch_root_node_id")
         return self
 
 
@@ -688,6 +697,8 @@ class GraphPatchOutput(PipelineModel):
                 provenance = operation.node.metadata.get("provenance_node_ids")
                 if isinstance(provenance, list):
                     references.update(item for item in provenance if isinstance(item, str))
+                if operation.node.branch_root_node_id is not None:
+                    references.add(operation.node.branch_root_node_id)
             if operation.changes is not None:
                 for key in ("source_node_id", "target_node_id", "branch_root_node_id"):
                     value = operation.changes.get(key)
@@ -888,14 +899,29 @@ _OPPORTUNITY_FAMILY_KINDS = {
 _GENERATED_METADATA_BASE = {
     "description",
     "generated_by_run_id",
+    "lineage_mode",
     "notes",
     "provenance_node_ids",
-    "regenerates_node_id",
+    "regenerated_from_node_id",
+    "regeneration_scope",
+    "review_status",
+    "summary",
+    "tags",
+}
+_CONSTRAINT_CLONE_METADATA_FIELDS = {
+    "category",
+    "context_scope",
+    "description",
+    "generated_by_run_id",
+    "notes",
+    "pinned",
+    "provenance_node_ids",
     "review_status",
     "summary",
     "tags",
 }
 _GENERATED_METADATA_ALLOWED = {
+    "constraint": _CONSTRAINT_CLONE_METADATA_FIELDS,
     "strategy": _GENERATED_METADATA_BASE
     | {"approach", "rationale", "strategy_template_id", "target_segment"},
     "source": _GENERATED_METADATA_BASE
@@ -951,6 +977,13 @@ _GENERATED_METADATA_ALLOWED = {
     | {"hypothesis", "method", "metric", "success_criteria", "timebox"},
 }
 _GENERATED_METADATA_REQUIRED = {
+    "constraint": {
+        "context_scope",
+        "generated_by_run_id",
+        "pinned",
+        "provenance_node_ids",
+        "review_status",
+    },
     "strategy": {
         "approach",
         "generated_by_run_id",
@@ -1031,6 +1064,77 @@ def _semantic_snapshot(stage_input: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(snapshot.get("nodes"), list) or not isinstance(snapshot.get("edges"), list):
         raise ValueError("the semantic graph snapshot is malformed")
     return snapshot
+
+
+def parallel_constraint_clone_specs(
+    stage_input: dict[str, Any],
+    successor_by_target: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Resolve each applicable branch constraint to its closest successor root(s)."""
+
+    if not successor_by_target:
+        return []
+    snapshot = _semantic_snapshot(stage_input)
+    nodes = {
+        str(node["id"]): node
+        for node in snapshot["nodes"]
+        if isinstance(node, dict) and node.get("id")
+    }
+    manifest = stage_input.get("context_manifest") or {}
+    anchors = manifest.get("branch_constraint_anchors") if isinstance(manifest, dict) else {}
+    if not isinstance(anchors, dict):
+        raise ValueError("branch_constraint_anchors must be an object")
+
+    adjacency: dict[str, set[str]] = {}
+    for edge in snapshot["edges"]:
+        if not isinstance(edge, dict):
+            continue
+        source_id = edge.get("source_node_id")
+        target_id = edge.get("target_node_id")
+        kind = edge.get("kind")
+        if not isinstance(source_id, str) or not isinstance(target_id, str):
+            continue
+        ancestor_id, descendant_id = (
+            (target_id, source_id)
+            if kind in {"constrained_by", "extracted_from"}
+            else (source_id, target_id)
+        )
+        adjacency.setdefault(ancestor_id, set()).add(descendant_id)
+
+    specs: list[dict[str, Any]] = []
+    target_ids = set(successor_by_target)
+    for constraint_id, anchor_id in sorted(anchors.items()):
+        if not isinstance(constraint_id, str) or not isinstance(anchor_id, str):
+            raise ValueError("branch constraint anchors must use string node IDs")
+        constraint = nodes.get(constraint_id)
+        if constraint is None or constraint.get("kind") != "constraint":
+            raise ValueError("branch constraint anchor references an unavailable constraint")
+        distances = {anchor_id: 0}
+        queue = [anchor_id]
+        for current in queue:
+            for descendant_id in sorted(adjacency.get(current, ())):
+                if descendant_id in distances:
+                    continue
+                distances[descendant_id] = distances[current] + 1
+                queue.append(descendant_id)
+        reachable = {
+            target_id: distances[target_id] for target_id in target_ids if target_id in distances
+        }
+        if not reachable:
+            raise ValueError("an applicable branch constraint has no regenerated successor root")
+        minimum_distance = min(reachable.values())
+        for target_id in sorted(
+            target_id for target_id, distance in reachable.items() if distance == minimum_distance
+        ):
+            specs.append(
+                {
+                    "constraint_id": constraint_id,
+                    "constraint": constraint,
+                    "target_id": target_id,
+                    "successor_id": successor_by_target[target_id],
+                }
+            )
+    return specs
 
 
 def _prior_stage_output(stage_input: dict[str, Any], stage_name: str) -> dict[str, Any]:
@@ -1383,6 +1487,8 @@ def _allowed_patch_node_kinds(operation: str | None, stage_input: dict[str, Any]
         allowed.update({"source", "claim"})
     if target_kinds & _OPPORTUNITY_FAMILY_KINDS:
         allowed.update(_OPPORTUNITY_FAMILY_KINDS)
+    if target_kinds:
+        allowed.add("constraint")
     return allowed
 
 
@@ -1427,6 +1533,137 @@ def _validate_generated_metadata(node: PatchNode, *, run_id: str) -> None:
         raise ValueError("generated nodes require the originating run ID")
     if metadata.get("review_status") not in {None, "provisional"}:
         raise ValueError("candidate generated nodes must remain provisional until patch acceptance")
+
+
+def _parallel_successors(
+    output: GraphPatchOutput,
+    stage_input: dict[str, Any],
+) -> dict[str, str]:
+    target_kinds = {
+        str(target.get("node_id")): str(target.get("kind"))
+        for target in stage_input.get("target_workset") or []
+        if isinstance(target, dict) and target.get("node_id") and target.get("kind")
+    }
+    scope = ((stage_input.get("context_manifest") or {}).get("request") or {}).get(
+        "regeneration_scope"
+    )
+    if scope not in {"node", "branch"}:
+        raise ValueError("regeneration patches require a frozen regeneration scope")
+
+    successor_by_target: dict[str, str] = {}
+    lineage_fields = {"regenerated_from_node_id", "regeneration_scope", "lineage_mode"}
+    for candidate in output.operations:
+        if candidate.op != "ADD_NODE" or candidate.node is None:
+            continue
+        metadata = candidate.node.metadata
+        present = lineage_fields & set(metadata)
+        is_production_root = candidate.node.kind in {"strategy", "claim", "opportunity"}
+        if present and not is_production_root:
+            raise ValueError("only regenerated production roots may declare parallel lineage")
+        if not present:
+            continue
+        if present != lineage_fields:
+            raise ValueError(
+                "regenerated production roots require complete parallel lineage metadata"
+            )
+        old_target_id = metadata["regenerated_from_node_id"]
+        if not isinstance(old_target_id, str) or old_target_id not in target_kinds:
+            raise ValueError("regenerated_from_node_id must name a frozen production target")
+        if candidate.node.kind != target_kinds[old_target_id]:
+            raise ValueError("a regenerated successor must preserve its production-root kind")
+        if metadata["regeneration_scope"] != scope or metadata["lineage_mode"] != "parallel":
+            raise ValueError(
+                "regenerated production roots require the frozen parallel lineage mode"
+            )
+        if old_target_id in successor_by_target:
+            raise ValueError("each frozen production target requires exactly one successor root")
+        assert candidate.client_generated_id is not None
+        successor_by_target[old_target_id] = candidate.client_generated_id
+    if set(successor_by_target) != set(target_kinds):
+        raise ValueError("regeneration patch successors do not match the frozen target workset")
+    return successor_by_target
+
+
+def _validate_constraint_clones(
+    output: GraphPatchOutput,
+    stage_input: dict[str, Any],
+    successor_by_target: dict[str, str],
+) -> None:
+    run_id = str(stage_input.get("run_id") or "")
+    specs = parallel_constraint_clone_specs(stage_input, successor_by_target)
+    expected_by_key = {(spec["constraint_id"], spec["successor_id"]): spec for spec in specs}
+    clone_operations = [
+        candidate
+        for candidate in output.operations
+        if candidate.op == "ADD_NODE"
+        and candidate.node is not None
+        and candidate.node.kind == "constraint"
+    ]
+    actual_by_key: dict[tuple[str, str], PatchOperationCandidate] = {}
+    for candidate in clone_operations:
+        assert candidate.node is not None
+        provenance = candidate.node.metadata.get("provenance_node_ids")
+        if not isinstance(provenance, list) or len(provenance) != 1:
+            raise ValueError(
+                "constraint clones require exactly one original constraint provenance ID"
+            )
+        branch_root_id = candidate.node.branch_root_node_id
+        if branch_root_id is None:
+            raise ValueError("constraint clones require a successor branch root")
+        key = (provenance[0], branch_root_id)
+        if key in actual_by_key:
+            raise ValueError(
+                "each applicable branch constraint may be cloned only once per successor"
+            )
+        actual_by_key[key] = candidate
+    if set(actual_by_key) != set(expected_by_key):
+        raise ValueError(
+            "constraint clones do not match applicable branch constraints and successors"
+        )
+
+    lineage_operation_by_successor: dict[str, str] = {}
+    for candidate in output.operations:
+        if candidate.op != "ADD_EDGE" or candidate.edge is None:
+            continue
+        if candidate.edge.kind != "evolves_into":
+            continue
+        expected_successor = successor_by_target.get(candidate.edge.source_node_id)
+        if expected_successor == candidate.edge.target_node_id:
+            lineage_operation_by_successor[candidate.edge.target_node_id] = candidate.operation_id
+
+    copyable_fields = _CONSTRAINT_CLONE_METADATA_FIELDS - {
+        "generated_by_run_id",
+        "provenance_node_ids",
+        "review_status",
+    }
+    for key, candidate in actual_by_key.items():
+        spec = expected_by_key[key]
+        original = spec["constraint"]
+        original_metadata = original.get("metadata")
+        if not isinstance(original_metadata, dict):
+            raise ValueError("an applicable branch constraint has invalid semantic metadata")
+        expected_metadata = {
+            field: original_metadata[field]
+            for field in sorted(copyable_fields)
+            if field in original_metadata
+        }
+        expected_metadata.update(
+            {
+                "generated_by_run_id": run_id,
+                "provenance_node_ids": [spec["constraint_id"]],
+                "review_status": "provisional",
+            }
+        )
+        assert candidate.node is not None
+        if (
+            candidate.node.title != original.get("title")
+            or candidate.node.body != original.get("body")
+            or candidate.node.metadata != expected_metadata
+        ):
+            raise ValueError("constraint clone content must exactly preserve the frozen constraint")
+        lineage_operation_id = lineage_operation_by_successor.get(spec["successor_id"])
+        if lineage_operation_id is None or lineage_operation_id not in candidate.depends_on:
+            raise ValueError("constraint clones must depend on the successor lineage operation")
 
 
 def _prior_models(
@@ -1681,7 +1918,9 @@ def _validate_patch_stage_binding(
             patch_claims = {
                 local_id: node for local_id, node in added_nodes.items() if node.kind == "claim"
             }
-            mapped = {node.metadata.get("regenerates_node_id") for node in patch_claims.values()}
+            mapped = {
+                node.metadata.get("regenerated_from_node_id") for node in patch_claims.values()
+            }
             if (
                 len(patch_claims) != len(claim_targets)
                 or mapped != claim_targets
@@ -1704,6 +1943,9 @@ def _validate_patch_stage_binding(
             mapped = {opportunity.target_node_id for opportunity in opportunities.values()}
             if mapped != opportunity_targets:
                 raise ValueError("opportunity replacements do not match the frozen target workset")
+        required_ids.update(
+            local_id for local_id, node in added_nodes.items() if node.kind == "constraint"
+        )
     else:
         raise ValueError("patch construction requires a known run operation")
 
@@ -1714,7 +1956,7 @@ def _validate_patch_stage_binding(
         _validate_strategy_patch_node(node, candidate)
         if (
             operation == "regenerate_stale"
-            and node.metadata.get("regenerates_node_id") != candidate.target_node_id
+            and node.metadata.get("regenerated_from_node_id") != candidate.target_node_id
         ):
             raise ValueError("patch strategy replacement target diverges from planning output")
     for source_id in required_ids & set(sources):
@@ -1728,7 +1970,7 @@ def _validate_patch_stage_binding(
         required_ids.update(family_ids)
         if (
             operation == "regenerate_stale"
-            and added_nodes[opportunity.id].metadata.get("regenerates_node_id")
+            and added_nodes[opportunity.id].metadata.get("regenerated_from_node_id")
             != opportunity.target_node_id
         ):
             raise ValueError("patch opportunity replacement target diverges from synthesis output")
@@ -1858,6 +2100,11 @@ def _expected_patch_relations(
             experiment_id = opportunity.validation_experiment.id
             if experiment_id in added_nodes:
                 bind(experiment_id, [opportunity.id], "requires_validation")
+    if _stage_operation(stage_input) == "regenerate_stale":
+        for local_id, node in sorted(added_nodes.items()):
+            old_target_id = node.metadata.get("regenerated_from_node_id")
+            if node.kind in {"strategy", "claim", "opportunity"} and isinstance(old_target_id, str):
+                expected_edges[(old_target_id, local_id, "evolves_into")] += 1
     return provenance_by_id, expected_edges
 
 
@@ -1905,6 +2152,9 @@ def _validate_patch_output(output: GraphPatchOutput, stage_input: dict[str, Any]
     }
     node_kinds = {**known_node_kinds, **local_node_kinds}
     _validate_patch_stage_binding(output, stage_input, known_node_ids=set(known_node_ids))
+    successor_by_target: dict[str, str] = {}
+    if operation == "regenerate_stale":
+        successor_by_target = _parallel_successors(output, stage_input)
     node_versions = {
         str(node["id"]): node.get("version")
         for node in snapshot["nodes"]
@@ -1926,6 +2176,8 @@ def _validate_patch_output(output: GraphPatchOutput, stage_input: dict[str, Any]
     )
     if actual_edges != expected_edges:
         raise ValueError("patch edge set does not exactly match validated semantic lineage")
+    if operation == "regenerate_stale":
+        _validate_constraint_clones(output, stage_input, successor_by_target)
     valid_provenance_ids = set(known_node_ids) | set(local_node_kinds)
     snapshot_edges = {
         str(edge["id"]): edge
@@ -1938,6 +2190,10 @@ def _validate_patch_output(output: GraphPatchOutput, stage_input: dict[str, Any]
             raise ValueError("semantic intelligence patches may not move authoritative nodes")
         if operation != "regenerate_stale" and candidate.op not in {"ADD_NODE", "ADD_EDGE"}:
             raise ValueError("new-generation patches may only add localized nodes and edges")
+        if operation == "regenerate_stale" and candidate.op not in {"ADD_NODE", "ADD_EDGE"}:
+            raise ValueError(
+                "parallel regeneration patches may only add fresh successor nodes and edges"
+            )
         if candidate.node_id is not None:
             if operation == "regenerate_stale" and candidate.node_id not in member_targets:
                 raise ValueError(
@@ -1980,8 +2236,10 @@ def _validate_patch_output(output: GraphPatchOutput, stage_input: dict[str, Any]
         ):
             raise ValueError("generated nodes require canonical known provenance IDs")
         local_id = str(candidate.client_generated_id)
-        if provenance != expected_provenance.get(local_id):
+        if provenance != expected_provenance.get(local_id) and candidate.node.kind != "constraint":
             raise ValueError("generated node provenance does not match validated checkpoints")
+        if candidate.node.kind == "constraint":
+            continue
         required_parent_kinds = {
             "strategy": {"goal"},
             "source": {"strategy"},

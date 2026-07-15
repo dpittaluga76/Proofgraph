@@ -10,8 +10,10 @@ from django.conf import settings
 from django.db import connections
 from django.http import HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
 
+from proofgraph.demo.authorization import authorize_canvas
 from proofgraph.generation.events import encode_sse_event
 from proofgraph.generation.models import GenerationEvent
+from proofgraph.graph.exceptions import GraphAPIError
 from proofgraph.graph.models import Canvas
 
 
@@ -92,6 +94,10 @@ async def canvas_events(request: HttpRequest, canvas_id: uuid.UUID) -> HttpRespo
             },
             status=422,
         )
+    try:
+        await sync_to_async(authorize_canvas, thread_sensitive=True)(request, canvas_id)
+    except GraphAPIError as error:
+        return JsonResponse(error.as_payload(), status=error.status)
     if not await sync_to_async(_canvas_exists, thread_sensitive=True)(canvas_id):
         return JsonResponse(
             {"error": {"code": "canvas_not_found", "message": "Canvas not found."}},

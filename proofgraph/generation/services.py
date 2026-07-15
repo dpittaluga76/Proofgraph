@@ -8,6 +8,12 @@ from typing import Any
 from django.db import transaction
 from django.utils import timezone
 
+from proofgraph.demo.models import DemoSession
+from proofgraph.demo.quotas import (
+    consume_hybrid_quota,
+    emit_replay_selected,
+    validate_demo_profile,
+)
 from proofgraph.generation.composition import get_composition
 from proofgraph.generation.context import canonical_json, validate_explicit_selection
 from proofgraph.generation.events import append_event_locked
@@ -47,11 +53,32 @@ def _run_created_payload(run: GenerationRun, after: int) -> dict[str, Any]:
 def create_generation_run(
     canvas_id: uuid.UUID,
     request: GenerationRunRequest,
+    *,
+    demo_session_id: uuid.UUID | None = None,
 ) -> ServiceResult:
     composition = get_composition()
     fingerprint = generation_request_fingerprint(request)
 
     with transaction.atomic():
+        demo_session = None
+        if demo_session_id is not None:
+            demo_session = (
+                DemoSession.objects.select_for_update().filter(pk=demo_session_id).first()
+            )
+            if demo_session is None or demo_session.active_canvas_id != canvas_id:
+                raise GraphAPIError(
+                    status=404,
+                    code="resource_not_found",
+                    message="The requested resource was not found.",
+                )
+            if demo_session.expires_at <= timezone.now():
+                raise GraphAPIError(
+                    status=401,
+                    code="demo_session_expired",
+                    message="This demo session expired. Reload to start a fresh isolated session.",
+                )
+            validate_demo_profile(demo_session, request.execution_profile_id)
+
         canvas = Canvas.objects.select_for_update().filter(pk=canvas_id).first()
         if canvas is None:
             raise GraphAPIError(status=404, code="canvas_not_found", message="Canvas not found.")
@@ -87,9 +114,15 @@ def create_generation_run(
             request=request,
             selected_nodes=selected_nodes,
         )
+        if demo_session is not None:
+            if request.execution_profile_id == "demo_hybrid_v1":
+                consume_hybrid_quota(demo_session)
+            else:
+                emit_replay_selected(demo_session)
         events_after_sequence = CanvasEventCursor.objects.get(canvas=canvas).last_sequence
         run = GenerationRun.objects.create(
             canvas=canvas,
+            demo_session=demo_session,
             operation=request.operation,
             idempotency_key=request.idempotency_key,
             request_fingerprint=fingerprint,
@@ -108,7 +141,14 @@ def create_generation_run(
         )
         result = ServiceResult(_run_created_payload(run, run.events_after_sequence), 202)
 
-    emit_telemetry("run.queued", run_id=run.id, canvas_id=canvas_id, operation=run.operation)
+    emit_telemetry(
+        "run.queued",
+        run_id=run.id,
+        canvas_id=canvas_id,
+        demo_session_id=demo_session_id,
+        operation=run.operation,
+        profile_id=request.execution_profile_id,
+    )
     return result
 
 

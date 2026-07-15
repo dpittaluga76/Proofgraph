@@ -29,8 +29,21 @@ from proofgraph.generation.schemas import PatchApplyRequest
 from proofgraph.generation.services import ServiceResult
 from proofgraph.generation.telemetry import emit_telemetry
 from proofgraph.graph.exceptions import GraphAPIError
-from proofgraph.graph.models import Canvas, Edge, EdgeKind, GraphOperation, Node, NodeKind
+from proofgraph.graph.models import (
+    Canvas,
+    Edge,
+    EdgeKind,
+    GraphOperation,
+    Node,
+    NodeKind,
+    NodeStalenessCause,
+)
 from proofgraph.graph.serialization import serialize_edge, serialize_node
+from proofgraph.graph.staleness import (
+    apply_staleness,
+    capture_direct_invalidation,
+    resolve_direct_invalidation,
+)
 
 PATCH_ACTOR_TYPE = "graph_patch"
 
@@ -39,6 +52,17 @@ PATCH_ACTOR_TYPE = "graph_patch"
 class AppliedCandidate:
     graph_operation: GraphOperation
     result: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class RegenerationApplicationContract:
+    scope: str
+    target_ids: tuple[uuid.UUID, ...]
+    permitted_stale_ids: tuple[uuid.UUID, ...]
+    successors: tuple[tuple[uuid.UUID, str, str], ...]
+    operation_groups: tuple[tuple[str, tuple[str, ...]], ...]
+    preserved_nodes: tuple[tuple[uuid.UUID, int, int | None], ...]
+    preserved_causes: tuple[tuple[int, int | None, Any | None], ...]
 
 
 def _conflict(
@@ -123,6 +147,406 @@ def _selection(
         ordered.extend(ready)
         remaining.difference_update(operation["operation_id"] for operation in ready)
     return selected_ids, ordered
+
+
+def _regeneration_conflict(
+    message: str,
+    *,
+    details: dict[str, Any] | None = None,
+) -> GraphAPIError:
+    return _conflict("patch_regeneration_contract_invalid", message, details=details)
+
+
+def _manifest_regeneration_contract(
+    patch: GraphPatch,
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    manifest = patch.run.context_manifest
+    regeneration = manifest.get("regeneration") if isinstance(manifest, dict) else None
+    request = manifest.get("request") if isinstance(manifest, dict) else None
+    if not isinstance(regeneration, dict) or not isinstance(request, dict):
+        raise _regeneration_conflict("The regeneration run has no frozen workset contract.")
+    scope = regeneration.get("scope")
+    if scope not in {"node", "branch"} or request.get("regeneration_scope") != scope:
+        raise _regeneration_conflict("The regeneration scope does not match the frozen request.")
+    targets = regeneration.get("targets")
+    if not isinstance(targets, list) or not targets:
+        raise _regeneration_conflict("The regeneration run has no frozen production targets.")
+    target_ids: list[str] = []
+    permitted_ids: set[str] = set()
+    for target in targets:
+        if not isinstance(target, dict) or not isinstance(target.get("node_id"), str):
+            raise _regeneration_conflict("A frozen regeneration target is malformed.")
+        target_id = target["node_id"]
+        target_ids.append(target_id)
+        stale_ids = target.get("stale_node_ids") or [target_id]
+        if not isinstance(stale_ids, list) or not all(
+            isinstance(value, str) for value in stale_ids
+        ):
+            raise _regeneration_conflict("A frozen regeneration stale-member set is malformed.")
+        permitted_ids.update(stale_ids)
+    if len(target_ids) != len(set(target_ids)):
+        raise _regeneration_conflict("Frozen regeneration targets are not unique.")
+    return scope, tuple(sorted(target_ids)), tuple(sorted(permitted_ids))
+
+
+_REGENERATION_ROOT_KINDS = {NodeKind.STRATEGY, NodeKind.CLAIM, NodeKind.OPPORTUNITY}
+_CONSTRAINT_CLONE_SYSTEM_METADATA = {
+    "generated_by_run_id",
+    "provenance_node_ids",
+    "review_status",
+    "source_patch_id",
+}
+
+
+def _constraint_semantic_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key not in _CONSTRAINT_CLONE_SYSTEM_METADATA
+    }
+
+
+def _validate_regeneration_application(
+    patch: GraphPatch,
+    canvas: Canvas,
+    operations: list[dict[str, Any]],
+    selected_ids: set[str],
+) -> RegenerationApplicationContract | None:
+    if patch.run.operation != "regenerate_stale":
+        if patch.regeneration_target_ids or patch.permitted_stale_resolution_ids:
+            raise _regeneration_conflict(
+                "A non-regeneration patch may not declare stale regeneration targets."
+            )
+        return None
+
+    scope, frozen_targets, frozen_permitted = _manifest_regeneration_contract(patch)
+    declared_targets = tuple(sorted(str(value) for value in patch.regeneration_target_ids))
+    declared_permitted = tuple(sorted(str(value) for value in patch.permitted_stale_resolution_ids))
+    if declared_targets != frozen_targets or declared_permitted != frozen_permitted:
+        raise _regeneration_conflict(
+            "The patch declarations do not match the frozen regeneration workset.",
+            details={
+                "expected_target_ids": list(frozen_targets),
+                "declared_target_ids": list(declared_targets),
+                "expected_permitted_stale_ids": list(frozen_permitted),
+                "declared_permitted_stale_ids": list(declared_permitted),
+            },
+        )
+    if any(operation["op"] not in {"ADD_NODE", "ADD_EDGE"} for operation in operations):
+        raise _regeneration_conflict(
+            "Always-parallel regeneration patches may only add successor nodes and edges."
+        )
+
+    target_ids = tuple(_parse_uuid(value, "regeneration_target_ids") for value in frozen_targets)
+    permitted_ids = tuple(
+        _parse_uuid(value, "permitted_stale_resolution_ids") for value in frozen_permitted
+    )
+    preserved_node_ids = set(target_ids) | set(permitted_ids)
+    locked_nodes = list(
+        Node.objects.select_for_update()
+        .filter(canvas=canvas, id__in=preserved_node_ids)
+        .order_by("id")
+    )
+    nodes_by_id = {node.id: node for node in locked_nodes}
+    missing_ids = sorted(str(node_id) for node_id in preserved_node_ids - nodes_by_id.keys())
+    active_cause_node_ids = set(
+        NodeStalenessCause.objects.filter(
+            canvas=canvas,
+            node_id__in=set(permitted_ids),
+            cleared_at__isnull=True,
+        ).values_list("node_id", flat=True)
+    )
+    non_stale_ids = sorted(
+        str(node_id)
+        for node_id in permitted_ids
+        if node_id in nodes_by_id
+        and (not nodes_by_id[node_id].stale or node_id not in active_cause_node_ids)
+    )
+    if missing_ids or non_stale_ids:
+        raise _regeneration_conflict(
+            "Every frozen regeneration member must still exist with an active stale cause.",
+            details={"missing_node_ids": missing_ids, "non_stale_node_ids": non_stale_ids},
+        )
+    operation_by_id = {operation["operation_id"]: operation for operation in operations}
+    successor_by_target: dict[uuid.UUID, tuple[dict[str, Any], str]] = {}
+    for operation in operations:
+        if operation["op"] != "ADD_NODE":
+            continue
+        node = operation["node"]
+        metadata = node.get("metadata", {})
+        if "regenerates_node_id" in metadata:
+            raise _regeneration_conflict(
+                "Regeneration patches may not use the obsolete regenerates_node_id metadata."
+            )
+        kind = node["kind"]
+        old_value = metadata.get("regenerated_from_node_id")
+        if kind not in _REGENERATION_ROOT_KINDS:
+            if old_value is not None:
+                raise _regeneration_conflict(
+                    "Only successor production roots may declare regenerated_from_node_id."
+                )
+            continue
+        if not isinstance(old_value, str):
+            raise _regeneration_conflict(
+                "Every successor production root requires regenerated_from_node_id."
+            )
+        old_id = _parse_uuid(old_value, "regenerated_from_node_id")
+        if old_id not in set(target_ids):
+            raise _regeneration_conflict(
+                "A successor production root references a node outside the frozen workset."
+            )
+        if old_id in successor_by_target:
+            raise _regeneration_conflict(
+                "Every frozen production root must have exactly one successor."
+            )
+        old_node = nodes_by_id[old_id]
+        if kind != old_node.kind:
+            raise _regeneration_conflict(
+                "A successor production root must preserve its predecessor node kind."
+            )
+        if (
+            metadata.get("regeneration_scope") != scope
+            or metadata.get("lineage_mode") != "parallel"
+        ):
+            raise _regeneration_conflict(
+                "Successor metadata must declare the frozen scope and parallel lineage mode."
+            )
+        if metadata.get("generated_by_run_id") != str(patch.run_id):
+            raise _regeneration_conflict(
+                "Successor metadata must identify the originating regeneration run."
+            )
+        local_id = operation.get("client_generated_id")
+        if not isinstance(local_id, str):
+            raise _regeneration_conflict("A successor production root requires a patch-local ID.")
+        successor_by_target[old_id] = (operation, local_id)
+    if set(successor_by_target) != set(target_ids):
+        raise _regeneration_conflict(
+            "The patch must contain exactly one successor for every frozen production root.",
+            details={
+                "missing_successor_ids": sorted(
+                    str(node_id) for node_id in set(target_ids) - successor_by_target.keys()
+                )
+            },
+        )
+
+    lineage_by_target: dict[uuid.UUID, dict[str, Any]] = {}
+    for old_id, (_successor, local_id) in successor_by_target.items():
+        matches = [
+            operation
+            for operation in operations
+            if operation["op"] == "ADD_EDGE"
+            and operation["edge"]["kind"] == EdgeKind.EVOLVES_INTO
+            and operation["edge"]["source_node_id"] == str(old_id)
+            and operation["edge"]["target_node_id"] == local_id
+        ]
+        if len(matches) != 1:
+            raise _regeneration_conflict(
+                "Every successor requires exactly one old-to-new evolves_into lineage edge."
+            )
+        lineage = matches[0]
+        successor_operation_id = successor_by_target[old_id][0]["operation_id"]
+        if successor_operation_id not in lineage["depends_on"]:
+            raise _regeneration_conflict(
+                "A lineage edge must depend on its successor node operation."
+            )
+        if lineage["edge"].get("metadata", {}).get("generated_by_run_id") != str(patch.run_id):
+            raise _regeneration_conflict(
+                "A lineage edge must identify the originating regeneration run."
+            )
+        lineage_by_target[old_id] = lineage
+
+    constraints = list(
+        Node.objects.select_for_update()
+        .filter(canvas=canvas, kind=NodeKind.CONSTRAINT, branch_root_id__in=set(target_ids))
+        .order_by("id")
+    )
+    constraints_by_id = {constraint.id: constraint for constraint in constraints}
+    clone_by_constraint: dict[uuid.UUID, dict[str, Any]] = {}
+    for operation in operations:
+        if operation["op"] != "ADD_NODE" or operation["node"]["kind"] != NodeKind.CONSTRAINT:
+            continue
+        node = operation["node"]
+        provenance = node.get("metadata", {}).get("provenance_node_ids")
+        if not isinstance(provenance, list) or len(provenance) != 1:
+            raise _regeneration_conflict(
+                "A cloned branch constraint requires exactly one predecessor constraint."
+            )
+        constraint_id = _parse_uuid(provenance[0], "provenance_node_ids")
+        constraint = constraints_by_id.get(constraint_id)
+        if constraint is None or constraint_id in clone_by_constraint:
+            raise _regeneration_conflict(
+                "A cloned branch constraint must uniquely match a current frozen anchor."
+            )
+        successor = successor_by_target[constraint.branch_root_id]
+        if node.get("branch_root_node_id") != successor[1]:
+            raise _regeneration_conflict(
+                "A cloned branch constraint must anchor to its corresponding successor."
+            )
+        metadata = node.get("metadata", {})
+        if (
+            metadata.get("generated_by_run_id") != str(patch.run_id)
+            or metadata.get("review_status") != "provisional"
+        ):
+            raise _regeneration_conflict(
+                "A cloned branch constraint must carry provisional generated provenance."
+            )
+        if node.get("title") != constraint.title or node.get("body") != constraint.body:
+            raise _regeneration_conflict(
+                "A cloned branch constraint must preserve its predecessor content."
+            )
+        if _constraint_semantic_metadata(metadata) != _constraint_semantic_metadata(
+            constraint.metadata
+        ):
+            raise _regeneration_conflict(
+                "A cloned branch constraint must preserve user-owned semantic metadata."
+            )
+        lineage_operation_id = lineage_by_target[constraint.branch_root_id]["operation_id"]
+        if lineage_operation_id not in operation["depends_on"]:
+            raise _regeneration_conflict(
+                "A cloned branch constraint must depend on the successor lineage edge."
+            )
+        clone_by_constraint[constraint_id] = operation
+    if set(clone_by_constraint) != set(constraints_by_id):
+        raise _regeneration_conflict(
+            "The patch must clone every applicable branch-scoped constraint.",
+            details={
+                "missing_constraint_ids": sorted(
+                    str(node_id) for node_id in set(constraints_by_id) - clone_by_constraint.keys()
+                )
+            },
+        )
+
+    successors: list[tuple[uuid.UUID, str, str]] = []
+    operation_groups: list[tuple[str, tuple[str, ...]]] = []
+    for old_id in sorted(target_ids, key=str):
+        successor, local_id = successor_by_target[old_id]
+        lineage = lineage_by_target[old_id]
+        clone_operation_ids = sorted(
+            clone["operation_id"]
+            for constraint_id, clone in clone_by_constraint.items()
+            if constraints_by_id[constraint_id].branch_root_id == old_id
+        )
+        group = tuple([successor["operation_id"], lineage["operation_id"], *clone_operation_ids])
+        selected_group = set(group) & selected_ids
+        if selected_group and selected_group != set(group):
+            raise _conflict(
+                "patch_regeneration_dependency_incomplete",
+                (
+                    "A successor, its lineage edge, and its cloned constraints must be "
+                    "reviewed together."
+                ),
+                details={
+                    "target_node_id": str(old_id),
+                    "required_operation_ids": list(group),
+                    "selected_operation_ids": sorted(selected_group),
+                },
+            )
+        successors.append((old_id, local_id, successor["operation_id"]))
+        operation_groups.append((str(old_id), group))
+
+    preserved_nodes = tuple(
+        (node.id, node.version, node.stale_since_revision) for node in locked_nodes
+    )
+    preserved_causes = tuple(
+        NodeStalenessCause.objects.filter(canvas=canvas, node_id__in=set(permitted_ids))
+        .order_by("id")
+        .values_list("id", "cleared_by_graph_operation_id", "cleared_at")
+    )
+    # Keep operation lookup validation close to the group construction. The schema
+    # normally guarantees this, but apply-time DQ-004 checks must not trust a corrupt row.
+    if any(
+        operation_id not in operation_by_id
+        for _, group in operation_groups
+        for operation_id in group
+    ):
+        raise _regeneration_conflict(
+            "A regeneration dependency group references a missing operation."
+        )
+    return RegenerationApplicationContract(
+        scope=scope,
+        target_ids=target_ids,
+        permitted_stale_ids=permitted_ids,
+        successors=tuple(successors),
+        operation_groups=tuple(operation_groups),
+        preserved_nodes=preserved_nodes,
+        preserved_causes=preserved_causes,
+    )
+
+
+def _propagate_regeneration_group_skips(
+    contract: RegenerationApplicationContract | None,
+    skipped: dict[str, dict[str, Any]],
+    conflicts: list[dict[str, Any]],
+) -> None:
+    if contract is None:
+        return
+    for target_id, group in contract.operation_groups:
+        blocked_by = sorted(set(group) & skipped.keys())
+        if not blocked_by:
+            continue
+        for operation_id in group:
+            if operation_id in skipped:
+                continue
+            conflict = {
+                "operation_id": operation_id,
+                "code": "regeneration_group_conflict",
+                "message": "The successor lineage group could not be applied atomically.",
+                "details": {"target_node_id": target_id, "blocked_by": blocked_by},
+            }
+            skipped[operation_id] = conflict
+            conflicts.append(conflict)
+
+
+def _validate_regeneration_preserved(
+    contract: RegenerationApplicationContract | None,
+    patch: GraphPatch,
+    applied_operation_ids: set[str],
+    client_id_map: dict[str, str],
+) -> None:
+    if contract is None:
+        return
+    preserved_node_ids = {
+        node_id for node_id, _version, _stale_revision in contract.preserved_nodes
+    }
+    current_nodes = tuple(
+        Node.objects.filter(canvas=patch.canvas, id__in=preserved_node_ids)
+        .order_by("id")
+        .values_list("id", "version", "stale_since_revision")
+    )
+    if current_nodes != contract.preserved_nodes or any(
+        not stale
+        for stale in Node.objects.filter(
+            canvas=patch.canvas, id__in=set(contract.permitted_stale_ids)
+        ).values_list("stale", flat=True)
+    ):
+        raise _regeneration_conflict(
+            "Applying a parallel regeneration patch changed an old stale production member."
+        )
+    current_causes = tuple(
+        NodeStalenessCause.objects.filter(
+            canvas=patch.canvas, node_id__in=set(contract.permitted_stale_ids)
+        )
+        .order_by("id")
+        .values_list("id", "cleared_by_graph_operation_id", "cleared_at")
+    )
+    if current_causes != contract.preserved_causes:
+        raise _regeneration_conflict(
+            "Applying a parallel regeneration patch changed an old staleness cause."
+        )
+    for old_id, local_id, operation_id in contract.successors:
+        if operation_id not in applied_operation_ids:
+            continue
+        successor = Node.objects.filter(pk=_parse_uuid(client_id_map[local_id], local_id)).first()
+        if successor is None or successor.metadata.get("review_status") != "accepted":
+            raise _regeneration_conflict("An applied regeneration successor was not accepted.")
+        if (
+            successor.metadata.get("regenerated_from_node_id") != str(old_id)
+            or successor.metadata.get("regeneration_scope") != contract.scope
+            or successor.metadata.get("lineage_mode") != "parallel"
+        ):
+            raise _regeneration_conflict(
+                "An applied successor lost its canonical lineage metadata."
+            )
 
 
 def _parse_uuid(value: Any, field: str) -> uuid.UUID:
@@ -267,10 +691,58 @@ def _preflight_operation(
                 "The deterministic node identity already exists.",
                 details={"node_id": str(node_id)},
             )
-        provenance = operation["node"].get("metadata", {}).get("provenance_node_ids", [])
+        node_data = operation["node"]
+        provenance = node_data.get("metadata", {}).get("provenance_node_ids", [])
         for value in provenance:
             if value not in client_id_map:
                 _node(canvas, _parse_uuid(value, "provenance_node_ids"))
+        branch_root_value = node_data.get("branch_root_node_id")
+        if node_data["kind"] != NodeKind.CONSTRAINT:
+            if branch_root_value is not None:
+                raise _conflict(
+                    "invalid_branch_root",
+                    "Only constraint nodes may have a branch root.",
+                )
+            return
+        scope = node_data.get("metadata", {}).get("context_scope")
+        if scope == "global":
+            if branch_root_value is not None:
+                raise _conflict(
+                    "invalid_branch_root",
+                    "Global constraints cannot have a branch root.",
+                )
+            return
+        if scope != "branch" or branch_root_value is None:
+            raise _conflict(
+                "invalid_branch_root",
+                "Branch constraints require a valid branch root.",
+            )
+        if branch_root_value in client_id_map:
+            root_operation = next(
+                (
+                    candidate
+                    for candidate in selected_operations
+                    if candidate.get("client_generated_id") == branch_root_value
+                ),
+                None,
+            )
+            if (
+                root_operation is None
+                or root_operation["op"] != "ADD_NODE"
+                or root_operation["node"]["kind"]
+                not in {NodeKind.STRATEGY, NodeKind.CLAIM, NodeKind.OPPORTUNITY}
+            ):
+                raise _conflict(
+                    "invalid_branch_root",
+                    "A branch root must be a strategy, claim, or opportunity.",
+                )
+        else:
+            root = _node(canvas, _parse_uuid(branch_root_value, "branch_root_node_id"))
+            if root.kind not in {NodeKind.STRATEGY, NodeKind.CLAIM, NodeKind.OPPORTUNITY}:
+                raise _conflict(
+                    "invalid_branch_root",
+                    "A branch root must be a strategy, claim, or opportunity.",
+                )
         return
 
     if op in {"UPDATE_NODE", "PATCH_NODE_METADATA", "MOVE_NODE", "DELETE_NODE"}:
@@ -434,7 +906,7 @@ def _apply_entity_change(
             "review_status": "accepted",
             "source_patch_id": str(patch.id),
         }
-        node = Node.objects.create(
+        node = Node(
             id=node_id,
             canvas=canvas,
             kind=kind,
@@ -447,6 +919,14 @@ def _apply_entity_change(
             position_updated_at=now,
             updated_at=now,
         )
+        node.branch_root = _branch_root(
+            canvas,
+            node,
+            metadata,
+            data.get("branch_root_node_id"),
+            client_id_map,
+        )
+        node.save(force_insert=True)
         return {"node": serialize_node(node)}, node
 
     if op in {"UPDATE_NODE", "PATCH_NODE_METADATA"}:
@@ -617,6 +1097,7 @@ def _apply_candidate(
     canvas: Canvas,
     operation: dict[str, Any],
     client_id_map: dict[str, str],
+    staleness_excluded_node_ids: set[uuid.UUID],
 ) -> AppliedCandidate:
     operation_id = operation["operation_id"]
     operation_key = str(uuid.uuid5(patch.id, operation_id))
@@ -642,9 +1123,25 @@ def _apply_candidate(
         return AppliedCandidate(existing, existing.result_payload)
 
     now = timezone.now()
+    invalidation = capture_direct_invalidation(canvas, operation)
     result, _entity = _apply_entity_change(patch, canvas, operation, client_id_map, now)
+    invalidated_node_ids = resolve_direct_invalidation(canvas, operation, invalidation)
+    eligible_nodes = list(
+        Node.objects.filter(canvas=canvas, id__in=invalidated_node_ids)
+        .exclude(id__in=staleness_excluded_node_ids)
+        .exclude(kind=NodeKind.GENERATION_PLACEHOLDER)
+        .filter(Q(metadata__review_status__isnull=True) | ~Q(metadata__review_status="rejected"))
+        .order_by("id")
+    )
+    eligible_node_ids = tuple(node.id for node in eligible_nodes)
+    newly_stale_node_ids = tuple(node.id for node in eligible_nodes if not node.stale)
     new_revision = canvas.revision + 1
-    result_payload = {"canvas_revision": new_revision, **result}
+    result_payload = {
+        "canvas_revision": new_revision,
+        **result,
+        "stale_node_ids": [str(node_id) for node_id in eligible_node_ids],
+        "newly_stale_node_ids": [str(node_id) for node_id in newly_stale_node_ids],
+    }
     graph_operation = GraphOperation.objects.create(
         canvas=canvas,
         actor_type=PATCH_ACTOR_TYPE,
@@ -657,6 +1154,16 @@ def _apply_candidate(
         canvas_revision=new_revision,
         created_at=now,
     )
+    if invalidation is not None and eligible_node_ids:
+        apply_staleness(
+            canvas,
+            node_ids=eligible_node_ids,
+            graph_operation=graph_operation,
+            origin_entity_type=invalidation.origin_entity_type,
+            origin_entity_id=invalidation.origin_entity_id,
+            canvas_revision=new_revision,
+            now=now,
+        )
     canvas.revision = new_revision
     canvas.updated_at = now
     canvas.save(update_fields=["revision", "updated_at"])
@@ -726,6 +1233,7 @@ def apply_graph_patch(patch_id: uuid.UUID, request: PatchApplyRequest) -> Servic
     rejected_count = 0
     skipped_count = 0
     conflicts: list[dict[str, Any]] = []
+    regeneration_contract: RegenerationApplicationContract | None = None
     with transaction.atomic():
         patch = GraphPatch.objects.select_for_update(of=("self",)).filter(pk=patch_id).first()
         if patch is None:
@@ -763,6 +1271,12 @@ def apply_graph_patch(patch_id: uuid.UUID, request: PatchApplyRequest) -> Servic
                     code="canvas_not_found",
                     message="Canvas not found.",
                 )
+            regeneration_contract = _validate_regeneration_application(
+                patch,
+                canvas,
+                operations,
+                selected_ids,
+            )
             selected_operations = [
                 operation for operation in operations if operation["operation_id"] in selected_ids
             ]
@@ -774,6 +1288,11 @@ def apply_graph_patch(patch_id: uuid.UUID, request: PatchApplyRequest) -> Servic
             _lock_touched_entities(canvas, selected_operations, local_ids)
             client_id_map = {
                 local_id: str(uuid.uuid5(patch.id, local_id)) for local_id in sorted(local_ids)
+            }
+            staleness_excluded_node_ids = {
+                _resolved_uuid(operation["node_id"], "node_id", client_id_map)
+                for operation in selected_operations
+                if operation["op"] == "DELETE_NODE"
             }
             applied: dict[str, AppliedCandidate] = {}
             skipped: dict[str, dict[str, Any]] = {}
@@ -825,6 +1344,12 @@ def apply_graph_patch(patch_id: uuid.UUID, request: PatchApplyRequest) -> Servic
                     skipped[operation_id] = conflict
                     conflicts.append(conflict)
 
+            _propagate_regeneration_group_skips(
+                regeneration_contract,
+                skipped,
+                conflicts,
+            )
+
             for operation in ordered:
                 operation_id = operation["operation_id"]
                 if operation_id in skipped:
@@ -848,6 +1373,7 @@ def apply_graph_patch(patch_id: uuid.UUID, request: PatchApplyRequest) -> Servic
                         canvas,
                         operation,
                         client_id_map,
+                        staleness_excluded_node_ids,
                     )
                 except GraphAPIError as error:
                     conflict = {
@@ -856,6 +1382,15 @@ def apply_graph_patch(patch_id: uuid.UUID, request: PatchApplyRequest) -> Servic
                         "message": error.message,
                         "details": error.details,
                     }
+                    if regeneration_contract is not None:
+                        raise _conflict(
+                            "patch_apply_conflict",
+                            (
+                                "A regeneration lineage group changed after preflight; "
+                                "the transaction was rolled back."
+                            ),
+                            details={"conflicts": [conflict]},
+                        ) from error
                     if not request.apply_nonconflicting_only:
                         raise _conflict(
                             "patch_apply_conflict",
@@ -864,6 +1399,13 @@ def apply_graph_patch(patch_id: uuid.UUID, request: PatchApplyRequest) -> Servic
                         ) from error
                     skipped[operation_id] = conflict
                     conflicts.append(conflict)
+
+            _validate_regeneration_preserved(
+                regeneration_contract,
+                patch,
+                set(applied),
+                client_id_map,
+            )
 
             now = timezone.now()
             operation_index = {
@@ -950,6 +1492,20 @@ def apply_graph_patch(patch_id: uuid.UUID, request: PatchApplyRequest) -> Servic
             replayed = False
 
     duration_ms = round((time.perf_counter() - started) * 1_000, 3)
+    regeneration_telemetry: dict[str, Any] = {}
+    if patch.run.operation == "regenerate_stale":
+        scope = (
+            regeneration_contract.scope
+            if regeneration_contract is not None
+            else (patch.run.context_manifest.get("regeneration") or {}).get("scope")
+        )
+        regeneration_telemetry = {
+            "regeneration_scope": scope,
+            "regeneration_workset_size": len(patch.regeneration_target_ids),
+            "permitted_stale_resolution_count": len(patch.permitted_stale_resolution_ids),
+            "accepted_resolution_count": 0,
+            "lineage_mode": "parallel",
+        }
     emit_telemetry(
         "patch.apply_replayed" if replayed else "patch.applied",
         patch_id=patch.id,
@@ -961,5 +1517,6 @@ def apply_graph_patch(patch_id: uuid.UUID, request: PatchApplyRequest) -> Servic
         accepted_operation_ratio=(accepted_count / len(operations) if operations else 0.0),
         conflict_count=len(conflicts),
         duration_ms=duration_ms,
+        **regeneration_telemetry,
     )
     return result

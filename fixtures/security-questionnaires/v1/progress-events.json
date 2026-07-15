@@ -10,9 +10,9 @@
       {"event_type": "research.source_found", "payload": {"provisional": true, "source_id": "source_synthetic_benchmark", "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sanitized_excerpt": "Synthetic teams reported repeated answer lookup and reviewer handoffs across enterprise questionnaires."}}
     ],
     "canonical_extract": [
-      {"event_type": "evidence.extracted", "payload": {"provisional": true, "claim_id": "claim_repeated_labor", "source_ids": ["source_synthetic_benchmark", "source_synthetic_interviews"]}},
-      {"event_type": "evidence.extracted", "payload": {"provisional": true, "claim_id": "claim_deal_delay", "source_ids": ["source_synthetic_interviews"]}},
-      {"event_type": "evidence.extracted", "payload": {"provisional": true, "claim_id": "claim_trust_burden", "source_ids": ["source_synthetic_interviews"]}}
+      {"event_type": "evidence.extracted", "payload": {"provisional": true, "claim_id": "claim_repeated_labor", "claim": "Security questionnaire response work repeats across enterprise sales cycles.", "classification": "observed", "evidence_type": "workflow_recurrence", "strength": "strong", "source_ids": ["source_synthetic_benchmark", "source_synthetic_interviews"]}},
+      {"event_type": "evidence.extracted", "payload": {"provisional": true, "claim_id": "claim_deal_delay", "claim": "Answer gathering and approval handoffs can delay enterprise deals.", "classification": "observed", "evidence_type": "labor_cost", "strength": "medium", "source_ids": ["source_synthetic_interviews"]}},
+      {"event_type": "evidence.extracted", "payload": {"provisional": true, "claim_id": "claim_trust_burden", "claim": "Teams may reject automation that removes human security review.", "classification": "contradicting", "evidence_type": "adoption_risk", "strength": "medium", "source_ids": ["source_synthetic_interviews"]}}
     ]
   }
 }

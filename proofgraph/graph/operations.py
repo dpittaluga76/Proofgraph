@@ -12,6 +12,12 @@ from django.utils import timezone
 from proofgraph.graph.exceptions import GraphAPIError
 from proofgraph.graph.models import Canvas, Edge, EdgeKind, GraphOperation, Node, NodeKind
 from proofgraph.graph.serialization import serialize_edge, serialize_node
+from proofgraph.graph.staleness import (
+    apply_staleness,
+    capture_direct_invalidation,
+    resolve_direct_invalidation,
+)
+from proofgraph.graph.telemetry import emit_graph_telemetry
 
 DIRECT_ACTOR_TYPE = "direct_api"
 _MISSING = object()
@@ -53,6 +59,8 @@ SERVER_OWNED_METADATA_FIELDS = frozenset(
         "canonical_url",
         "content_hash",
         "evidence",
+        "eligible_independence_keys",
+        "eligible_source_ids",
         "generated_by_run_id",
         "generation_run_id",
         "independence_key",
@@ -76,6 +84,7 @@ SERVER_OWNED_METADATA_FIELDS = frozenset(
         "staleness_causes",
         "status",
         "support_status",
+        "support_reviewed_by_operation_id",
         "supported",
         "speculative",
         "url",
@@ -706,6 +715,264 @@ def _delete_edge(canvas: Canvas, payload: dict[str, Any], _now: Any) -> dict[str
     return {"deleted_edge_id": deleted_edge_id}
 
 
+def _replace_assumption(
+    canvas: Canvas,
+    payload: dict[str, Any],
+    now: Any,
+) -> dict[str, object]:
+    _validate_keys(
+        payload,
+        allowed={"op", "operation_key", "node_id", "expected_version", "replacement"},
+        required={"op", "operation_key", "node_id", "expected_version", "replacement"},
+    )
+    assumption = _locked_node(canvas, payload["node_id"])
+    if assumption.kind != NodeKind.ASSUMPTION:
+        raise _unprocessable(
+            "invalid_assumption",
+            "Assumption replacement requires an assumption node.",
+        )
+    if assumption.metadata.get("review_status") != "accepted":
+        raise _unprocessable(
+            "invalid_assumption",
+            "Assumption replacement requires an applied, non-rejected assumption.",
+        )
+    expected = _positive_version(payload["expected_version"], "expected_version")
+    _check_version(assumption, expected)
+    replacement = _validate_json_object(payload["replacement"], "replacement")
+    _validate_keys(
+        replacement,
+        allowed={"title", "body"},
+        required={"title"},
+    )
+    owner_ids = list(
+        Edge.objects.filter(
+            canvas=canvas,
+            target=assumption,
+            kind=EdgeKind.DERIVED_FROM,
+            source__kind=NodeKind.OPPORTUNITY,
+        )
+        .order_by("source_id")
+        .values_list("source_id", flat=True)
+        .distinct()
+    )
+    owners = list(Node.objects.select_for_update().filter(id__in=owner_ids).order_by("id"))
+    if len(owners) != 1:
+        raise _unprocessable(
+            "invalid_assumption_lineage",
+            "The assumption must belong to exactly one opportunity family.",
+            details={"owner_count": len(owners)},
+        )
+    previous = {
+        "title": assumption.title,
+        "body": assumption.body,
+        "version": assumption.version,
+        "opportunity_id": str(owners[0].id),
+    }
+    assumption.title = _validate_title(replacement["title"], kind=assumption.kind)
+    if "body" in replacement:
+        assumption.body = _validate_body(replacement["body"], kind=assumption.kind)
+    else:
+        assumption.body = assumption.title
+    assumption.version += 1
+    assumption.context_token_count = None
+    assumption.context_content_hash = None
+    assumption.semantic_updated_at = now
+    assumption.updated_at = now
+    assumption.save(
+        update_fields=[
+            "title",
+            "body",
+            "version",
+            "context_token_count",
+            "context_content_hash",
+            "semantic_updated_at",
+            "updated_at",
+        ]
+    )
+    return {
+        "node": serialize_node(assumption),
+        "previous_assumption": previous,
+        "opportunity_id": str(owners[0].id),
+    }
+
+
+def _reject_evidence(
+    canvas: Canvas,
+    payload: dict[str, Any],
+    now: Any,
+) -> dict[str, object]:
+    _validate_keys(
+        payload,
+        allowed={"op", "operation_key", "node_id", "expected_version"},
+        required={"op", "operation_key", "node_id", "expected_version"},
+    )
+    evidence = _locked_node(canvas, payload["node_id"])
+    if evidence.kind not in {NodeKind.SOURCE, NodeKind.CLAIM}:
+        raise _unprocessable(
+            "invalid_evidence",
+            "Evidence rejection requires a source or claim node.",
+        )
+    if evidence.metadata.get("review_status") == "provisional":
+        raise _unprocessable(
+            "invalid_evidence",
+            "Provisional evidence must be accepted through patch review before rejection.",
+        )
+    if evidence.metadata.get("review_status") == "rejected":
+        raise GraphAPIError(
+            status=409,
+            code="evidence_already_rejected",
+            message="The evidence was already rejected.",
+        )
+    expected = _positive_version(payload["expected_version"], "expected_version")
+    _check_version(evidence, expected)
+
+    impacted_claims: list[Node] = []
+    if evidence.kind == NodeKind.SOURCE:
+        claim_ids = list(
+            Edge.objects.filter(
+                canvas=canvas,
+                kind=EdgeKind.EXTRACTED_FROM,
+                target=evidence,
+                source__kind=NodeKind.CLAIM,
+            )
+            .order_by("source_id")
+            .values_list("source_id", flat=True)
+            .distinct()
+        )
+        impacted_claims = list(
+            Node.objects.select_for_update()
+            .filter(canvas=canvas, id__in=claim_ids)
+            .filter(
+                Q(metadata__review_status__isnull=True) | ~Q(metadata__review_status="rejected")
+            )
+            .order_by("id")
+        )
+
+    rejected_claim_ids: list[uuid.UUID] = []
+    retained_claim_ids: list[uuid.UUID] = []
+    for claim in impacted_claims:
+        source_ids = list(
+            Edge.objects.filter(
+                canvas=canvas,
+                kind=EdgeKind.EXTRACTED_FROM,
+                source=claim,
+                target__kind=NodeKind.SOURCE,
+            )
+            .exclude(target=evidence)
+            .order_by("target_id")
+            .values_list("target_id", flat=True)
+            .distinct()
+        )
+        eligible_sources = list(
+            Node.objects.select_for_update()
+            .filter(canvas=canvas, id__in=source_ids)
+            .filter(
+                Q(metadata__review_status__isnull=True)
+                | ~Q(metadata__review_status__in=["provisional", "rejected"])
+            )
+            .order_by("id")
+        )
+        eligible_keys = sorted(
+            {
+                key
+                for source in eligible_sources
+                for key in [source.metadata.get("independence_key")]
+                if isinstance(key, str) and key
+            }
+        )
+        claim.metadata = {
+            **claim.metadata,
+            "eligible_source_ids": [str(source.id) for source in eligible_sources],
+            "eligible_independence_keys": eligible_keys,
+            "independent_support_count": len(eligible_keys),
+        }
+        if eligible_sources:
+            retained_claim_ids.append(claim.id)
+        else:
+            claim.metadata["review_status"] = "rejected"
+            rejected_claim_ids.append(claim.id)
+        claim.version += 1
+        claim.context_token_count = None
+        claim.context_content_hash = None
+        claim.semantic_updated_at = now
+        claim.updated_at = now
+
+    evidence.metadata = {**evidence.metadata, "review_status": "rejected"}
+    evidence.version += 1
+    evidence.context_token_count = None
+    evidence.context_content_hash = None
+    evidence.semantic_updated_at = now
+    evidence.updated_at = now
+    if impacted_claims:
+        Node.objects.bulk_update(
+            impacted_claims,
+            [
+                "metadata",
+                "version",
+                "context_token_count",
+                "context_content_hash",
+                "semantic_updated_at",
+                "updated_at",
+            ],
+        )
+    evidence.save(
+        update_fields=[
+            "metadata",
+            "version",
+            "context_token_count",
+            "context_content_hash",
+            "semantic_updated_at",
+            "updated_at",
+        ]
+    )
+    return {
+        "rejected_evidence_id": str(evidence.id),
+        "rejected_evidence_kind": evidence.kind,
+        "impacted_claim_ids": [str(claim.id) for claim in impacted_claims],
+        "rejected_claim_ids": [str(node_id) for node_id in rejected_claim_ids],
+        "retained_claim_ids": [str(node_id) for node_id in retained_claim_ids],
+    }
+
+
+def _stamp_evidence_review_operation(
+    canvas: Canvas,
+    graph_operation: GraphOperation,
+    result: dict[str, object],
+    now: Any,
+) -> None:
+    rejected_ids = {
+        uuid.UUID(node_id)
+        for field in ("rejected_evidence_id", "rejected_claim_ids")
+        for node_id in (
+            [result[field]] if isinstance(result.get(field), str) else result.get(field, [])
+        )
+        if isinstance(node_id, str)
+    }
+    retained_ids = {
+        uuid.UUID(node_id)
+        for node_id in result.get("retained_claim_ids", [])
+        if isinstance(node_id, str)
+    }
+    nodes = list(
+        Node.objects.select_for_update()
+        .filter(canvas=canvas, id__in=rejected_ids | retained_ids)
+        .order_by("id")
+    )
+    for node in nodes:
+        node.metadata = {
+            **node.metadata,
+            "reviewed_by_operation_id": graph_operation.id,
+            **(
+                {"rejected_by_operation_id": graph_operation.id}
+                if node.id in rejected_ids
+                else {"support_reviewed_by_operation_id": graph_operation.id}
+            ),
+        }
+        node.updated_at = now
+    if nodes:
+        Node.objects.bulk_update(nodes, ["metadata", "updated_at"])
+
+
 OperationHandler = Callable[[Canvas, dict[str, Any], Any], dict[str, object]]
 OPERATION_HANDLERS: dict[str, OperationHandler] = {
     "ADD_NODE": _add_node,
@@ -716,6 +983,8 @@ OPERATION_HANDLERS: dict[str, OperationHandler] = {
     "DELETE_EDGE": _delete_edge,
     "PATCH_NODE_METADATA": _patch_node_metadata,
     "MOVE_NODE": _move_node,
+    "REPLACE_ASSUMPTION": _replace_assumption,
+    "REJECT_EVIDENCE": _reject_evidence,
 }
 
 
@@ -751,6 +1020,7 @@ def apply_graph_operation(
 ) -> dict[str, object]:
     canonical_payload, op, fingerprint = _canonical_request(payload)
 
+    telemetry_events: list[tuple[str, dict[str, Any]]] = []
     with transaction.atomic():
         canvas = Canvas.objects.select_for_update().filter(pk=canvas_id).first()
         if canvas is None:
@@ -783,10 +1053,31 @@ def apply_graph_operation(
             )
 
         now = timezone.now()
+        invalidation = capture_direct_invalidation(canvas, canonical_payload)
         result = handler(canvas, canonical_payload, now)
+        invalidated_node_ids = resolve_direct_invalidation(
+            canvas,
+            canonical_payload,
+            invalidation,
+        )
+        eligible_nodes = list(
+            Node.objects.filter(canvas=canvas, id__in=invalidated_node_ids)
+            .exclude(kind=NodeKind.GENERATION_PLACEHOLDER)
+            .filter(
+                Q(metadata__review_status__isnull=True) | ~Q(metadata__review_status="rejected")
+            )
+            .order_by("id")
+        )
+        eligible_node_ids = tuple(node.id for node in eligible_nodes)
+        newly_stale_node_ids = tuple(node.id for node in eligible_nodes if not node.stale)
         new_revision = canvas.revision + 1
-        result_payload = {"canvas_revision": new_revision, **result}
-        GraphOperation.objects.create(
+        result_payload = {
+            "canvas_revision": new_revision,
+            **result,
+            "stale_node_ids": [str(node_id) for node_id in eligible_node_ids],
+            "newly_stale_node_ids": [str(node_id) for node_id in newly_stale_node_ids],
+        }
+        graph_operation = GraphOperation.objects.create(
             canvas=canvas,
             actor_type=actor_type,
             actor_id=actor_id,
@@ -798,7 +1089,47 @@ def apply_graph_operation(
             canvas_revision=new_revision,
             created_at=now,
         )
+        if op == "REJECT_EVIDENCE":
+            _stamp_evidence_review_operation(canvas, graph_operation, result, now)
+            telemetry_events.append(
+                (
+                    "graph.evidence_rejected",
+                    {
+                        "canvas_id": canvas.id,
+                        "graph_operation_id": graph_operation.id,
+                        "evidence_kind": result["rejected_evidence_kind"],
+                        "impacted_claim_count": len(result["impacted_claim_ids"]),
+                        "rejected_claim_count": len(result["rejected_claim_ids"]),
+                        "retained_claim_count": len(result["retained_claim_ids"]),
+                    },
+                )
+            )
+        if invalidation is not None and eligible_node_ids:
+            staleness = apply_staleness(
+                canvas,
+                node_ids=eligible_node_ids,
+                graph_operation=graph_operation,
+                origin_entity_type=invalidation.origin_entity_type,
+                origin_entity_id=invalidation.origin_entity_id,
+                canvas_revision=new_revision,
+                now=now,
+            )
+            telemetry_events.append(
+                (
+                    "graph.staleness_propagated",
+                    {
+                        "canvas_id": canvas.id,
+                        "graph_operation_id": graph_operation.id,
+                        "origin_entity_type": invalidation.origin_entity_type,
+                        "origin_entity_id": invalidation.origin_entity_id,
+                        "stale_count": len(staleness.stale_node_ids),
+                        "newly_stale_count": len(staleness.newly_stale_node_ids),
+                    },
+                )
+            )
         canvas.revision = new_revision
         canvas.updated_at = now
         canvas.save(update_fields=["revision", "updated_at"])
-        return result_payload
+    for event_name, telemetry in telemetry_events:
+        emit_graph_telemetry(event_name, **telemetry)
+    return result_payload

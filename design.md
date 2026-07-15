@@ -6,7 +6,7 @@
 **Target:** OpenAI Build Week hackathon MVP  
 **Primary track:** Work & Productivity  
 **Primary user:** Technical founder or product builder  
-**Last updated:** July 14, 2026
+**Last updated:** July 15, 2026
 **Author:** Daniel Pittaluga
 
 ---
@@ -362,7 +362,7 @@ When a source or claim is rejected:
 - Accepted descendants that depended on it are marked stale through the normal transitive invalidation rules.
 - Rejecting a source rejects claims supported only by that source; claims with other accepted independent sources remain eligible but lose the rejected source from their support calculation.
 
-Whether rejected evidence remains visible as a muted node is a presentation decision and does not change these semantics.
+Rejected evidence remains visible by default as a muted node under DQ-002. The canvas uses a persistent text badge and accessible status in addition to reduced visual emphasis; color or opacity alone never communicates rejection. Rejected source and claim nodes remain keyboard-focusable and inspectable for their audit history, but generation selection controls exclude them and explain why. This presentation does not change the fixed rejection, support, context-exclusion, or invalidation semantics.
 
 Evidence rejection is one short graph transaction. It locks the canvas first, validates the evidence semantic version, records the rejection operation, updates support eligibility, marks newly affected descendants stale, writes every staleness cause, and increments the canvas revision together. A failure rolls back all of those effects; no intermediate state may expose rejected evidence with accepted dependent claims or missing stale markers.
 
@@ -493,7 +493,7 @@ Editing, deleting, rejecting, or disconnecting an upstream node or dependency ed
 
 Staleness is durable lifecycle state, not an arbitrary metadata flag. Each node has a queryable `stale` flag and zero or more append-only cause records tied to the graph operation that invalidated it. The first fresh-to-stale transition increments the node semantic version exactly once, updates `semantic_updated_at`, and invalidates its token representation; adding another cause to an already stale node does not increment the version again. Propagation is computed once from the originating mutation and writes causes without recursively treating the system-generated stale transitions as new invalidation origins.
 
-Only successful application of a regeneration patch may declare specific production units resolved. In replacement mode, a reused target clears every active cause, changes back to fresh, and receives exactly one semantic-version increment for the combined content/lifecycle update; a deleted target removes its cause rows through the declared delete, and replacement nodes are born fresh. In parallel mode the old nodes remain stale and the new branch is born fresh. Manual edits and reversal of the original premise never silently clear staleness. Deleting a stale node removes its active cause rows while the graph-operation audit remains.
+The MVP always applies stale regeneration as a parallel branch under DQ-004. Old production-unit nodes and every active cause remain unchanged and stale; fresh successor nodes receive new identities. Each successor production root records the old root in canonical `regenerated_from_node_id` metadata and is linked by an audited `evolves_into` edge from old to new. `permitted_stale_resolution_ids` remains an immutable workset fence and audit declaration, but Phase 4 application clears zero old-node causes. Manual edits and reversal of the original premise never silently clear staleness. Deleting a stale node removes its active cause rows while the graph-operation audit remains. Destructive replacement is outside the MVP.
 
 ### 9.3 Node structure
 
@@ -525,7 +525,7 @@ Only successful application of a regeneration patch may declare specific product
 
 Constraint nodes use semantic metadata `context_scope: global | branch` and `pinned: boolean`. A branch-scoped constraint also has a relational `branch_root_node_id` pointing to exactly one same-canvas `strategy`, `claim`, or `opportunity` root. Global constraints require a null branch root; branch-scoped constraints require a non-null root. A pinned global constraint is automatically included in every compatible operation. A pinned branch constraint is automatically included only when the operation has at least one mandatory generated-node selection and every such selection is its root or a reachable dependent of that root. Unpinned constraints enter context only through explicit selection or normal graph-neighborhood traversal.
 
-Pinning, unpinning, changing scope, or reanchoring a branch constraint is an audited semantic mutation with an `expected_version` precondition. A branch root cannot be deleted while constraints reference it; the conflict reports those constraint IDs so the user can delete, reanchor, or change their scope first. Parallel regeneration preserves the old anchor and proposes a new branch constraint or reanchor operation according to DQ-004; replacement regeneration reanchors the existing constraint in the accepted patch.
+Pinning, unpinning, changing scope, or reanchoring a branch constraint is an audited semantic mutation with an `expected_version` precondition. A branch root cannot be deleted while constraints reference it; the conflict reports those constraint IDs so the user can delete, reanchor, or change their scope first. Under the always-parallel DQ-004 policy, regeneration preserves every old anchor and proposes a fresh clone of each applicable branch-scoped constraint anchored to the corresponding successor production root. The clone and its new root are dependency-linked candidate operations, so partial review cannot apply an orphaned branch constraint.
 
 ### 9.4 Graph-native requirements
 
@@ -862,7 +862,7 @@ CREATE TABLE graph_patch (
 
 Allowed patch statuses are `pending`, `applied`, `partially_applied`, and `rejected`.
 
-For a non-regeneration patch, both regeneration arrays are empty. A Phase 3 regeneration patch persists the complete frozen production-unit IDs in `regeneration_target_ids` and the complete stale member IDs that Phase 4 is permitted to resolve in `permitted_stale_resolution_ids`. These fields are immutable candidate-patch declarations, not an instruction to clear staleness. PG-023 applies only the subset allowed by the lineage mode selected in DQ-004: replacement mode may clear permitted reused or deleted targets, while parallel mode clears none of the old-node causes.
+For a non-regeneration patch, both regeneration arrays are empty. A Phase 3 regeneration patch persists the complete frozen production-unit IDs in `regeneration_target_ids` and the complete stale member IDs fenced by `permitted_stale_resolution_ids`. These fields are immutable candidate-patch declarations, not an instruction to clear staleness. Under the always-parallel DQ-004 policy, PG-023 validates the declarations but clears none of the old-node causes; it creates fresh successors, explicit old-to-new lineage, and any required cloned branch constraints.
 
 ### 12.10 Graph patch operation decision
 
@@ -1215,7 +1215,7 @@ One branch run then executes these non-empty phase batches in order:
 3. Opportunity-family targets: `Synthesize → Critique`.
 4. One final `Patch construction` stage composing every regenerated production unit.
 
-Earlier batch results are provisional in-run inputs to later batches and never mutate authoritative graph state. Targets within a batch use stable graph-distance then node-ID order; cycles and converging paths do not duplicate a target. Checkpoint keys include the branch phase, stable target set, and input hash, so retry resumes completed batches exactly. Failure or cancellation terminates the one run and exposes no partial graph mutation. The final patch applies the replace-or-parallel lineage policy from DQ-004, resolves only its declared target units when accepted, and leaves unrelated branches unchanged.
+Earlier batch results are provisional in-run inputs to later batches and never mutate authoritative graph state. Targets within a batch use stable graph-distance then node-ID order; cycles and converging paths do not duplicate a target. Checkpoint keys include the branch phase, stable target set, and input hash, so retry resumes completed batches exactly. Failure or cancellation terminates the one run and exposes no partial graph mutation. Under DQ-004, the final patch always creates a parallel branch with fresh production roots, explicit old-to-new lineage, cloned anchored constraints where required, no old-cause clearing, and no operations against unrelated branches.
 
 Regeneration cardinality follows the frozen production-unit workset, not the default new-idea cardinality. Node scope emits one replacement unit; a branch batch emits exactly one candidate unit for each deduplicated target unit. The default three-strategy and three-opportunity outputs apply only to `generate_strategies` and `synthesize_opportunities` respectively.
 
@@ -1656,7 +1656,7 @@ The endpoint:
 5. Validates the accepted operation dependency graph and prerequisite closure.
 6. Allocates and persists the accepted `client_generated_id` to UUID map.
 7. Resolves references and applies accepted operations in dependency order.
-8. Applies any validated regeneration resolution to stale flags and cause rows for the patch's declared target units.
+8. Validates any regeneration declarations; the MVP's always-parallel policy creates fresh lineage and clears no old stale flags or cause rows.
 9. Writes idempotent graph-operation records and links them to `accepted` patch-operation decisions.
 10. Records `rejected` and `skipped_conflict` decisions for every reviewed operation not applied.
 11. Increments canvas revision when at least one graph operation was applied.
@@ -1933,6 +1933,23 @@ For each required dimension, calculate the paired scenario-level difference betw
 - Specificity
 - Testability
 - Builder fit
+
+### 23.6 Evaluation placement and reproducibility
+
+The evaluation harness is an internal, command-line benchmark and does not ship in the product UI. Its audience is maintainers, independent raters, and submission reviewers who need a reproducible result artifact; anonymous demo visitors do not receive benchmark controls, raw variant identities, rater identities, or evaluation-provider access.
+
+The repository contains at least twenty versioned synthetic builder scenarios, the fixed rubric, prompt/model/strategy versions, and deterministic preparation and analysis code. A generation run persists a private variant-keyed artifact. A separate preparation step derives opaque output IDs from a caller-supplied random seed, randomizes display order independently per scenario, strips variant labels and provider metadata, and emits one blind packet plus separate empty templates for two raters. The private variant map is not given to raters. Rating artifacts retain both original scores; disagreements of two or more points require an adjudication record with a final consensus score and rationale before analysis can proceed.
+
+The four variants are frozen as:
+
+- `generic`: one generic opportunity-brainstorming response from the builder scenario alone.
+- `strategy_only`: explicit strategy planning followed by opportunity generation from the scenario and strategy output.
+- `strategy_plus_evidence`: strategy planning, analysis of the scenario's versioned benchmark evidence packet, then opportunity generation from both.
+- `full_pipeline`: the strategy-plus-evidence path followed by one critique-and-revision pass over the normalized opportunities.
+
+All variants use the same configured GPT-5.6 model, normalized final output schema, opportunity count, response budget, and core builder scenario; only the frozen variant stages above determine whether the versioned evidence packet is available. Evidence packets are synthetic benchmark inputs rather than claims about current external reality. Live generation is an explicit cost-bearing command that requires server-side OpenAI credentials, records response IDs and token usage in the private artifact, sets API storage off, and can resume without repeating completed calls. Packet preparation, scoring, adjudication validation, bootstrap confidence intervals, and report generation are deterministic offline steps.
+
+The result artifact reports every dimension, scenario-level full-versus-generic paired differences, mean improvements, deterministic 95% scenario-bootstrap intervals, prompt/model/strategy versions, original rater scores, and adjudications. PG-027 is complete only after two independent blinded rating artifacts cover all outputs, every qualifying disagreement is adjudicated, and all four required dimensions meet section 23.5. Summary results may be copied into repository documentation, but no evaluation data or controls are added to the public application.
 
 ---
 
@@ -2407,17 +2424,17 @@ The MVP is complete when a first-time user can:
 ### 32.1 Resolved decisions
 
 1. **DQ-001 — Progressive evidence display:** validated extraction batches appear progressively as provisional evidence. They become authoritative and selectable for synthesis only after the user accepts the evidence patch.
-2. **DQ-003 — Derived-evidence-only retention:** persist citations, hashes, derived claims, and sanitized excerpts of at most 500 Unicode characters, never complete retrieved or user-supplied source documents. Derived records live until canvas deletion, future cache rows expire after 24 hours, fixture content must be synthetic or redistributable, and every durable payload is verified against the retention policy.
-3. **DQ-005 — Explicit graph neighborhoods for MVP context:** Phase 3 uses only the operation-specific graph neighborhood and dependency directions from sections 9.2.1 and 13. Traversal is cycle-safe breadth-first search with deterministic tier ranking, semantic-recency ordering, and stable-ID tie-breaking; it performs no embedding call and incurs no semantic-search storage or provider cost. If an optional graph tier is empty or disconnected, it remains empty rather than falling back to fuzzy similarity. Semantic similarity is deferred until evaluation demonstrates that explicit neighborhoods miss material context. Tests cover directionality, cycles, disconnected branches, stable truncation, layout independence, and the hard serialized-input cap.
-4. **DQ-008 — Canonical security-questionnaire opportunity:** the canonical scenario is a small B2B SaaS vendor trying to reduce the repeated work and enterprise-sales delay caused by security questionnaires. Inputs describe a small technical team, a six-week MVP horizon, public or user-approved evidence only, and no promise to replace legal or security review. Expected evidence covers repeated questionnaire labor, deal-cycle delay, spreadsheet/document workarounds, existing spend, identifiable security/sales-operations buyers, crowded incumbent tooling, trust and integration burden, and falsifying no-budget or low-recurrence signals. The expected opportunity is an evidence-backed questionnaire response workspace with reusable approved answers, provenance, reviewer workflow, and a cheap concierge validation experiment. The reset state contains the goal and builder constraints before generation; the immutable bundle ID is `security_questionnaires_v1`.
+2. **DQ-002 — Muted-visible rejected evidence:** rejected source and claim nodes remain visible by default for auditability. They use a persistent `Rejected evidence` text/status badge, muted styling that preserves readable contrast, and accessible names that do not rely on color or opacity. They remain focusable and inspectable, but selection controls exclude them with an explanation; context packing, support calculations, synthesis, critique, and invalidation retain the fixed rejection semantics from section 8.2.1. Canvas acceptance verifies the node remains after reload, its rejection operation is inspectable, it cannot be selected for generation, and affected descendants are visibly stale.
+3. **DQ-003 — Derived-evidence-only retention:** persist citations, hashes, derived claims, and sanitized excerpts of at most 500 Unicode characters, never complete retrieved or user-supplied source documents. Derived records live until canvas deletion, future cache rows expire after 24 hours, fixture content must be synthetic or redistributable, and every durable payload is verified against the retention policy.
+4. **DQ-004 — Always-parallel stale regeneration:** explicit stale-node and stale-branch regeneration always creates fresh successor production units and never replaces, updates, deletes, reanchors, or clears causes on the old stale branch. Each successor root carries canonical `regenerated_from_node_id`, `regeneration_scope`, and `lineage_mode: parallel` metadata and an audited old-to-new `evolves_into` edge. Applicable branch-scoped constraints are cloned and anchored to the successor while old anchors remain unchanged. The old branch supplies immediate undo/reference, accepted successors can be compared through lineage, and removing a successor remains an ordinary audited deletion workflow. Rejecting the patch changes no graph state; partial acceptance must preserve successor, lineage-edge, and cloned-constraint dependency closure. Destructive replacement is deferred beyond the MVP.
+5. **DQ-005 — Explicit graph neighborhoods for MVP context:** Phase 3 uses only the operation-specific graph neighborhood and dependency directions from sections 9.2.1 and 13. Traversal is cycle-safe breadth-first search with deterministic tier ranking, semantic-recency ordering, and stable-ID tie-breaking; it performs no embedding call and incurs no semantic-search storage or provider cost. If an optional graph tier is empty or disconnected, it remains empty rather than falling back to fuzzy similarity. Semantic similarity is deferred until evaluation demonstrates that explicit neighborhoods miss material context. Tests cover directionality, cycles, disconnected branches, stable truncation, layout independence, and the hard serialized-input cap.
+6. **DQ-006 — Internal-only evaluation harness:** the comparative benchmark is a command-line, Git-reviewable workflow for maintainers, two blinded raters, and submission reviewers. It does not add product UI or expose raw variant/rater/provider data to anonymous visitors. Versioned synthetic scenarios, a private variant-keyed generation artifact, a separately randomized blind packet, two rating artifacts, adjudications, and a deterministic bootstrap report implement section 23.6. Only summarized results may be copied into repository documentation.
+7. **DQ-008 — Canonical security-questionnaire opportunity:** the canonical scenario is a small B2B SaaS vendor trying to reduce the repeated work and enterprise-sales delay caused by security questionnaires. Inputs describe a small technical team, a six-week MVP horizon, public or user-approved evidence only, and no promise to replace legal or security review. Expected evidence covers repeated questionnaire labor, deal-cycle delay, spreadsheet/document workarounds, existing spend, identifiable security/sales-operations buyers, crowded incumbent tooling, trust and integration burden, and falsifying no-budget or low-recurrence signals. The expected opportunity is an evidence-backed questionnaire response workspace with reusable approved answers, provenance, reviewer workflow, and a cheap concierge validation experiment. The reset state contains the goal and builder constraints before generation; the immutable bundle ID is `security_questionnaires_v1`.
 
 ### 32.2 Open questions
 
 These do not block the architecture, but must be resolved before the dependent implementation task:
 
-2. **DQ-002:** Should rejected evidence remain visible as a muted node for auditability?
-4. **DQ-004:** Should explicit stale-node regeneration replace the old branch or always create a parallel branch?
-6. **DQ-006:** Should the evaluation harness ship in the product UI or remain an internal benchmark?
 7. **DQ-007:** What is the final product name?
 
 ---
@@ -2444,7 +2461,7 @@ These do not block the architecture, but must be resolved before the dependent i
 - Node token counts are precomputed from semantic content.
 - Upstream changes cause transitive staleness, never automatic recursive regeneration.
 - Staleness is persisted with auditable causes; fresh-to-stale and accepted-resolution transitions have explicit version rules.
-- Stale branch regeneration is one frozen composite run with checkpointed strategy, evidence, and opportunity batches and one final patch.
+- Stale branch regeneration is one frozen composite run with checkpointed strategy, evidence, and opportunity batches and one final always-parallel patch; old stale branches and causes remain intact.
 - Failed runs resume from completed stage checkpoints when semantic inputs and provider identity match.
 - Safe explicit retry requeues only retryable, non-exhausted failed runs with their immutable inputs unchanged.
 - Claim/reclaim increments attempts atomically, exhausted crashed runs terminalize, and cancellation has state-specific idempotent semantics.
@@ -2458,7 +2475,7 @@ These do not block the architecture, but must be resolved before the dependent i
 - Deterministic evidence clustering is checkpointed and shared by every execution profile.
 - Evidence independence is source-level, and contradicting claims carry a normalized contradiction target before clustering.
 - Validated evidence streams progressively as provisional output and becomes authoritative only through patch acceptance.
-- Rejected evidence is excluded from future reasoning and causes dependent accepted descendants to become stale.
+- Rejected evidence remains visibly muted and auditable while being excluded from future reasoning and causing dependent accepted descendants to become stale.
 - Every reviewed patch operation receives a durable accepted, rejected, or skipped-conflict decision.
 - Graph patches persist client-generated-ID mappings and apply operations in validated dependency order.
 - Regenerating an unapplied patch rejects it audibly and creates one idempotently linked run from current graph state.
@@ -2533,6 +2550,12 @@ These do not block the architecture, but must be resolved before the dependent i
 - Web independence keys use registrable publisher domains and identical-content mirror normalization before clustering and support counting.
 - Intellectual-property enforcement is clause-aware and intent-sensitive, covering material paraphrases while allowing negated guardrails and descriptive risks.
 - Phase 3 regeneration patches persist mode-neutral target and permitted-resolution declarations; DQ-004 remains the Phase 4 decision that controls actual stale-cause clearing.
+
+### v9
+
+- DQ-002 keeps rejected evidence visible by default with accessible muted presentation while preserving its fixed exclusion and invalidation semantics.
+- DQ-004 selects always-parallel stale regeneration: fresh successor identities, explicit old-to-new lineage, cloned branch constraints, and no old-node cause clearing.
+- Replacement regeneration is outside the MVP; regeneration declarations remain immutable workset fences and audit data.
 
 ---
 

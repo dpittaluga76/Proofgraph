@@ -9,6 +9,11 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
+from proofgraph.demo.authorization import (
+    authorize_canvas,
+    demo_authorization_active,
+    resolve_demo_session,
+)
 from proofgraph.graph.exceptions import GraphAPIError
 from proofgraph.graph.lifecycle import delete_canvas
 from proofgraph.graph.models import Canvas, GraphOperation
@@ -83,6 +88,13 @@ def _locked_canvas_or_error(canvas_id: uuid.UUID) -> Canvas:
 @require_http_methods(["POST"])
 @_api_errors
 def canvas_collection(request: HttpRequest) -> JsonResponse:
+    if demo_authorization_active(request):
+        resolve_demo_session(request)
+        raise GraphAPIError(
+            status=403,
+            code="demo_canvas_creation_disabled",
+            message="Use demo reset to restore the isolated canonical canvas.",
+        )
     title = _validate_canvas_payload(_json_object(request))
     canvas = Canvas.objects.create(title=title)
     return JsonResponse({"canvas": serialize_canvas(canvas)}, status=201)
@@ -91,6 +103,7 @@ def canvas_collection(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "PATCH", "DELETE"])
 @_api_errors
 def canvas_detail(request: HttpRequest, canvas_id: uuid.UUID) -> HttpResponse:
+    session = authorize_canvas(request, canvas_id)
     if request.method == "GET":
         with transaction.atomic():
             canvas_payload = serialize_canvas(_locked_canvas_or_error(canvas_id))
@@ -106,6 +119,12 @@ def canvas_detail(request: HttpRequest, canvas_id: uuid.UUID) -> HttpResponse:
             canvas_payload = serialize_canvas(canvas)
         return JsonResponse({"canvas": canvas_payload})
 
+    if session is not None:
+        raise GraphAPIError(
+            status=403,
+            code="demo_canvas_delete_disabled",
+            message="Use demo reset to replace the isolated canonical canvas.",
+        )
     delete_canvas(canvas_id)
     return HttpResponse(status=204)
 
@@ -132,8 +151,14 @@ def _after_revision(request: HttpRequest) -> int:
 @require_http_methods(["GET", "POST"])
 @_api_errors
 def canvas_operations(request: HttpRequest, canvas_id: uuid.UUID) -> JsonResponse:
+    session = authorize_canvas(request, canvas_id)
     if request.method == "POST":
-        result = apply_graph_operation(canvas_id, _json_object(request))
+        result = apply_graph_operation(
+            canvas_id,
+            _json_object(request),
+            actor_type="demo_session" if session is not None else "direct_api",
+            actor_id=str(session.id) if session is not None else None,
+        )
         return JsonResponse(result)
 
     after = _after_revision(request)

@@ -142,6 +142,7 @@ def test_canonical_goal_and_builder_constraints_survive_save_and_reload() -> Non
         changes={"metadata": {"display_order": 2}},
     )
     assert updated_edge_result["edge"]["version"] == 2
+    assert updated_edge_result["newly_stale_node_ids"] == [goal_id]
 
     reload_response = client.get(f"/api/canvases/{canvas_id}")
     assert reload_response.status_code == 200
@@ -163,7 +164,9 @@ def test_canonical_goal_and_builder_constraints_survive_save_and_reload() -> Non
             "success_criteria": "A cheap falsifiable validation experiment",
         },
         "position": {"x": 358, "y": 72},
-        "version": 2,
+        "stale": True,
+        "stale_since_revision": 12,
+        "version": 3,
         "position_version": 2,
     }
     for constraint_id in constraint_ids:

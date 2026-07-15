@@ -82,6 +82,97 @@ export type PatchApplyResult = {
   }>;
 };
 
+export type GenerationOperation =
+  | "generate_strategies"
+  | "research_evidence"
+  | "synthesize_opportunities"
+  | "regenerate_stale";
+
+export type GenerationRunStatus =
+  "queued" | "running" | "patch_ready" | "completed" | "failed" | "cancelled";
+
+export type GenerationRunError = {
+  code: string;
+  message: string;
+  retryable: boolean;
+  stage: string | null;
+  details: Record<string, unknown>;
+};
+
+export type GenerationRun = {
+  run_id: string;
+  canvas_id: string;
+  operation: GenerationOperation;
+  status: GenerationRunStatus;
+  current_stage: string | null;
+  attempt: number;
+  max_attempts: number;
+  cancellation_state: "not_requested" | "requested" | "cancelled";
+  error: GenerationRunError | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  ready_patch_id: string | null;
+};
+
+export type GenerationRunRequest = {
+  operation: GenerationOperation;
+  selected_node_ids: string[];
+  expected_node_versions: Record<string, number>;
+  instruction: string | null;
+  execution_profile_id: "demo_hybrid_v1" | "replay_v1";
+  idempotency_key: string;
+  regeneration_scope: "node" | "branch" | null;
+};
+
+export type GenerationRunCreated = {
+  run_id: string;
+  status: GenerationRunStatus;
+  events_url: string;
+};
+
+export type RuntimeStatus = {
+  status: "ok";
+  database: "ok";
+  demo_mode: boolean;
+};
+
+export type DemoSession = {
+  expires_at: string;
+  hybrid_run_count: number;
+  hybrid_run_limit: number;
+  primary_profile: "demo_hybrid_v1";
+  fallback_profile: "replay_v1";
+};
+
+export type DemoBootstrap = {
+  session: DemoSession;
+  canvas: GraphCanvas;
+};
+
+export type GenerationEvent = {
+  run_id: string;
+  canvas_sequence: number;
+  run_sequence: number;
+  event_type:
+    | "run.started"
+    | "run.resumed"
+    | "run.retry_requested"
+    | "stage.started"
+    | "stage.progress"
+    | "research.query_created"
+    | "research.source_found"
+    | "evidence.extracted"
+    | "candidate.generated"
+    | "candidate.critiqued"
+    | "patch.ready"
+    | "run.completed"
+    | "run.failed"
+    | "run.cancelled";
+  payload: Record<string, unknown>;
+  timestamp: string;
+};
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -148,8 +239,26 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-export async function checkRuntime(): Promise<void> {
-  await request<{ status: "ok"; database: "ok" }>("/api/health");
+let demoBootstrapInFlight: Promise<DemoBootstrap> | null = null;
+
+export async function checkRuntime(): Promise<RuntimeStatus> {
+  return request<RuntimeStatus>("/api/health");
+}
+
+export async function bootstrapDemo(): Promise<DemoBootstrap> {
+  demoBootstrapInFlight ??= request<DemoBootstrap>("/api/demo/bootstrap");
+  try {
+    return await demoBootstrapInFlight;
+  } finally {
+    demoBootstrapInFlight = null;
+  }
+}
+
+export async function resetDemo(): Promise<DemoBootstrap> {
+  return request<DemoBootstrap>("/api/demo/reset", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 export async function createCanvas(title: string): Promise<GraphCanvas> {
@@ -177,6 +286,40 @@ export async function renameCanvas(
     { method: "PATCH", body: JSON.stringify({ title }) },
   );
   return response.canvas;
+}
+
+export async function createGenerationRun(
+  canvasId: string,
+  input: GenerationRunRequest,
+): Promise<GenerationRunCreated> {
+  return request<GenerationRunCreated>(
+    `/api/canvases/${encodeURIComponent(canvasId)}/generation-runs`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function getGenerationRun(runId: string): Promise<GenerationRun> {
+  return request<GenerationRun>(
+    `/api/generation-runs/${encodeURIComponent(runId)}`,
+  );
+}
+
+export async function cancelGenerationRun(
+  runId: string,
+): Promise<GenerationRun> {
+  return request<GenerationRun>(
+    `/api/generation-runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export async function retryGenerationRun(
+  runId: string,
+): Promise<GenerationRun> {
+  return request<GenerationRun>(
+    `/api/generation-runs/${encodeURIComponent(runId)}/retry`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
 }
 
 export async function getGraphPatch(patchId: string): Promise<GraphPatch> {
@@ -269,21 +412,29 @@ function operationFingerprint(
 export type NodeOperationResult = {
   canvas_revision: number;
   node: GraphNode;
+  stale_node_ids?: string[];
+  newly_stale_node_ids?: string[];
 };
 
 export type EdgeOperationResult = {
   canvas_revision: number;
   edge: GraphEdge;
+  stale_node_ids?: string[];
+  newly_stale_node_ids?: string[];
 };
 
 export type DeleteNodeResult = {
   canvas_revision: number;
   deleted_node_id: string;
+  stale_node_ids?: string[];
+  newly_stale_node_ids?: string[];
 };
 
 export type DeleteEdgeResult = {
   canvas_revision: number;
   deleted_edge_id: string;
+  stale_node_ids?: string[];
+  newly_stale_node_ids?: string[];
 };
 
 export async function applyOperation<T>(

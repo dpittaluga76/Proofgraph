@@ -1,5 +1,6 @@
 from django.urls import path
 
+from proofgraph.demo.api import demo_bootstrap, demo_reset
 from proofgraph.generation.api import (
     generation_run_cancel,
     generation_run_collection,
@@ -19,6 +20,8 @@ from proofgraph.runtime.views import health
 
 urlpatterns = [
     path("api/health", health, name="health"),
+    path("api/demo/bootstrap", demo_bootstrap, name="demo-bootstrap"),
+    path("api/demo/reset", demo_reset, name="demo-reset"),
     path("api/canvases", canvas_collection, name="canvas-collection"),
     path("api/canvases/<uuid:canvas_id>", canvas_detail, name="canvas-detail"),
     path(

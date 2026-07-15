@@ -17,7 +17,7 @@ def test_health_reports_postgresql_ready() -> None:
     response = Client().get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "database": "ok"}
+    assert response.json() == {"status": "ok", "database": "ok", "demo_mode": False}
     assert "csrftoken" in response.cookies
 
 

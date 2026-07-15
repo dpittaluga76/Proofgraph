@@ -7,6 +7,12 @@ from django.db import transaction
 from django.utils import timezone
 from pydantic import ValidationError
 
+from proofgraph.demo.models import DemoSession
+from proofgraph.demo.quotas import (
+    consume_hybrid_quota,
+    emit_replay_selected,
+    validate_demo_profile,
+)
 from proofgraph.generation.composition import get_composition
 from proofgraph.generation.context import validate_explicit_selection
 from proofgraph.generation.models import (
@@ -290,9 +296,22 @@ def _regeneration_conflict(patch: GraphPatch, *, reason: str, message: str) -> N
 def regenerate_graph_patch(
     patch_id: uuid.UUID,
     request: PatchRegenerationRequest,
+    *,
+    demo_session_id: uuid.UUID | None = None,
 ) -> ServiceResult:
     replayed = False
     with transaction.atomic():
+        demo_session = None
+        if demo_session_id is not None:
+            demo_session = (
+                DemoSession.objects.select_for_update().filter(pk=demo_session_id).first()
+            )
+            if demo_session is None or demo_session.expires_at <= timezone.now():
+                raise GraphAPIError(
+                    status=401,
+                    code="demo_session_expired",
+                    message="This demo session expired. Reload to start a fresh isolated session.",
+                )
         patch = (
             GraphPatch.objects.select_for_update(of=("self",))
             .select_related("run", "regenerated_by_run")
@@ -305,6 +324,15 @@ def regenerate_graph_patch(
                 status=404,
                 code="graph_patch_not_found",
                 message="Graph patch not found.",
+            )
+        if demo_session is not None and (
+            demo_session.active_canvas_id != patch.canvas_id
+            or patch.run.demo_session_id != demo_session.id
+        ):
+            raise GraphAPIError(
+                status=404,
+                code="resource_not_found",
+                message="The requested resource was not found.",
             )
 
         emit_telemetry(
@@ -390,6 +418,8 @@ def regenerate_graph_patch(
                     reason="execution_profile_missing",
                     message="The original execution profile cannot be reconstructed.",
                 )
+            if demo_session is not None:
+                validate_demo_profile(demo_session, profile_id)
             manifest = (
                 original_run.context_manifest
                 if isinstance(original_run.context_manifest, dict)
@@ -447,8 +477,14 @@ def regenerate_graph_patch(
                 )
 
             events_after_sequence = CanvasEventCursor.objects.get(canvas=canvas).last_sequence
+            if demo_session is not None:
+                if profile_id == "demo_hybrid_v1":
+                    consume_hybrid_quota(demo_session)
+                else:
+                    emit_replay_selected(demo_session)
             linked_run = GenerationRun.objects.create(
                 canvas=canvas,
+                demo_session=demo_session,
                 operation=current_request.operation,
                 idempotency_key=current_request.idempotency_key,
                 request_fingerprint=generation_request_fingerprint(current_request),

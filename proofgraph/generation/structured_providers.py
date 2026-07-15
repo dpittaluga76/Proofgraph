@@ -287,6 +287,7 @@ class OpenAIStructuredProviders:
                 payload={
                     "provisional": True,
                     "claim_id": claim.id,
+                    "claim": claim.claim,
                     "classification": claim.classification,
                     "evidence_type": claim.evidence_type,
                     "strength": claim.strength,

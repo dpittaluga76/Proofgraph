@@ -252,6 +252,58 @@ def make_stale_generated(canvas: Canvas, kind: str, title: str) -> Node:
     return node
 
 
+@override_settings(GENERATION_COMPOSITION_FACTORY=TEST_COMPOSITION)
+def test_stale_manually_authored_node_cannot_start_regeneration() -> None:
+    canvas = Canvas.objects.create(title="Manual regeneration gate")
+    with transaction.atomic():
+        operation = GraphOperation.objects.create(
+            canvas=canvas,
+            actor_type="test",
+            operation_key="stale-manual-strategy",
+            request_fingerprint="stale-manual-strategy",
+            operation_type="MARK_STALE",
+            payload={},
+            result_payload={},
+            canvas_revision=1,
+        )
+        strategy = Node.objects.create(
+            canvas=canvas,
+            kind=NodeKind.STRATEGY,
+            title="Manually authored strategy",
+            metadata={"review_status": "accepted"},
+            stale=True,
+            stale_since_revision=1,
+        )
+        NodeStalenessCause.objects.create(
+            canvas=canvas,
+            node=strategy,
+            cause_graph_operation=operation,
+            origin_entity_type="node",
+            origin_entity_id=strategy.id,
+        )
+        with connection.cursor() as cursor:
+            cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+
+    response = Client().post(
+        f"/api/canvases/{canvas.id}/generation-runs",
+        data=json.dumps(
+            {
+                "operation": "regenerate_stale",
+                "selected_node_ids": [str(strategy.id)],
+                "expected_node_versions": {str(strategy.id): strategy.version},
+                "execution_profile_id": "phase2_test_v1",
+                "idempotency_key": "manual-regeneration-rejected",
+                "regeneration_scope": "node",
+            }
+        ),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_generation_selection"
+    assert GenerationRun.objects.filter(canvas=canvas).count() == 0
+
+
 @pytest.mark.parametrize(
     "metadata",
     (

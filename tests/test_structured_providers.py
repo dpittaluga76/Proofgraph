@@ -266,6 +266,9 @@ def test_extraction_preserves_sources_retains_twelve_and_emits_provisional_event
     assert len(result.output["rejected"]) == 1
     assert len(result.progress_events) == 12
     assert all(event.payload["provisional"] is True for event in result.progress_events)
+    assert [event.payload["claim"] for event in result.progress_events] == [
+        claim["claim"] for claim in result.output["claims"]
+    ]
     assert len(result.output["claims"][0]["source_ids"]) == 2
 
 

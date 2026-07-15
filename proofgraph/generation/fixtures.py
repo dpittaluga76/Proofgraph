@@ -10,7 +10,10 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from proofgraph.generation.context import canonical_json
-from proofgraph.generation.pipeline_schemas import STAGE_OUTPUT_MODELS
+from proofgraph.generation.pipeline_schemas import (
+    STAGE_OUTPUT_MODELS,
+    parallel_constraint_clone_specs,
+)
 from proofgraph.generation.ports import ProviderStageRequest
 from proofgraph.generation.provider_errors import ProviderExecutionError
 from proofgraph.generation.retention import validate_progress_payload, validate_retained_payload
@@ -525,11 +528,14 @@ def _build_fixture_patch(stage_input: dict[str, Any]) -> dict[str, Any]:
     target_workset = [
         target for target in stage_input.get("target_workset") or [] if isinstance(target, dict)
     ]
+    regeneration_scope = request.get("regeneration_scope") if isinstance(request, dict) else None
 
     operations: list[dict[str, Any]] = []
     local_node_kinds: dict[str, str] = {}
     creator_by_id: dict[str, str] = {}
     edge_keys: set[tuple[str, str, str]] = set()
+    successor_by_target: dict[str, str] = {}
+    lineage_operation_by_successor: dict[str, str] = {}
 
     def add_node(
         local_id: str,
@@ -538,33 +544,57 @@ def _build_fixture_patch(stage_input: dict[str, Any]) -> dict[str, Any]:
         title: str,
         body: str | None,
         metadata: dict[str, Any],
+        branch_root_node_id: str | None = None,
+        additional_dependencies: tuple[str, ...] = (),
     ) -> None:
         operation_id = f"add_{local_id}"
         provenance = metadata.get("provenance_node_ids") or []
         dependencies = sorted(
-            creator_by_id[parent_id] for parent_id in provenance if parent_id in creator_by_id
+            {
+                *(
+                    creator_by_id[parent_id]
+                    for parent_id in provenance
+                    if parent_id in creator_by_id
+                ),
+                *(
+                    [creator_by_id[branch_root_node_id]]
+                    if branch_root_node_id in creator_by_id
+                    else []
+                ),
+                *additional_dependencies,
+            }
         )
+        node_payload = {
+            "kind": kind,
+            "title": title,
+            "body": body,
+            "metadata": metadata,
+        }
+        if branch_root_node_id is not None:
+            node_payload["branch_root_node_id"] = branch_root_node_id
         operations.append(
             {
                 "operation_id": operation_id,
                 "op": "ADD_NODE",
                 "depends_on": dependencies,
                 "client_generated_id": local_id,
-                "node": {
-                    "kind": kind,
-                    "title": title,
-                    "body": body,
-                    "metadata": metadata,
-                },
+                "node": node_payload,
             }
         )
         creator_by_id[local_id] = operation_id
         local_node_kinds[local_id] = kind
 
-    def add_edge(source_id: str, target_id: str, kind: str) -> None:
+    def add_edge(source_id: str, target_id: str, kind: str) -> str:
         key = (source_id, target_id, kind)
         if key in edge_keys:
-            return
+            return next(
+                operation["operation_id"]
+                for operation in operations
+                if operation.get("op") == "ADD_EDGE"
+                and operation.get("edge", {}).get("source_node_id") == source_id
+                and operation.get("edge", {}).get("target_node_id") == target_id
+                and operation.get("edge", {}).get("kind") == kind
+            )
         edge_keys.add(key)
         dependencies = sorted(
             {
@@ -588,6 +618,7 @@ def _build_fixture_patch(stage_input: dict[str, Any]) -> dict[str, Any]:
                 },
             }
         )
+        return f"add_edge_{index}"
 
     planning_outputs = _prior_fixture_outputs(stage_input, "planning")
     strategies = [
@@ -626,7 +657,13 @@ def _build_fixture_patch(stage_input: dict[str, Any]) -> dict[str, Any]:
             "strategy_template_id": candidate["template_id"],
         }
         if target_id is not None:
-            metadata["regenerates_node_id"] = str(target_id)
+            metadata.update(
+                {
+                    "regenerated_from_node_id": str(target_id),
+                    "regeneration_scope": regeneration_scope,
+                    "lineage_mode": "parallel",
+                }
+            )
         add_node(
             candidate_id,
             kind="strategy",
@@ -636,6 +673,14 @@ def _build_fixture_patch(stage_input: dict[str, Any]) -> dict[str, Any]:
         )
         for goal_id in provenance:
             add_edge(goal_id, candidate_id, "evolves_into")
+        if target_id is not None:
+            target_id = str(target_id)
+            successor_by_target[target_id] = candidate_id
+            lineage_operation_by_successor[candidate_id] = add_edge(
+                target_id,
+                candidate_id,
+                "evolves_into",
+            )
 
     extraction_outputs = _prior_fixture_outputs(stage_input, "extracting")
     sources = {
@@ -734,8 +779,16 @@ def _build_fixture_patch(stage_input: dict[str, Any]) -> dict[str, Any]:
         }
         if claim.get("contradiction_target_key") is not None:
             metadata["contradiction_target_key"] = claim["contradiction_target_key"]
+        target_claim_id: str | None = None
         if claim_targets:
-            metadata["regenerates_node_id"] = claim_targets[index]
+            target_claim_id = claim_targets[index]
+            metadata.update(
+                {
+                    "regenerated_from_node_id": target_claim_id,
+                    "regeneration_scope": regeneration_scope,
+                    "lineage_mode": "parallel",
+                }
+            )
         add_node(
             claim_id,
             kind="claim",
@@ -745,6 +798,13 @@ def _build_fixture_patch(stage_input: dict[str, Any]) -> dict[str, Any]:
         )
         for source_id in source_ids:
             add_edge(claim_id, source_id, "extracted_from")
+        if target_claim_id is not None:
+            successor_by_target[target_claim_id] = claim_id
+            lineage_operation_by_successor[claim_id] = add_edge(
+                target_claim_id,
+                claim_id,
+                "evolves_into",
+            )
 
     synthesis_outputs = _prior_fixture_outputs(stage_input, "synthesizing")
     opportunities = [
@@ -781,7 +841,13 @@ def _build_fixture_patch(stage_input: dict[str, Any]) -> dict[str, Any]:
             }
         )
         if opportunity.get("target_node_id") is not None:
-            metadata["regenerates_node_id"] = str(opportunity["target_node_id"])
+            metadata.update(
+                {
+                    "regenerated_from_node_id": str(opportunity["target_node_id"]),
+                    "regeneration_scope": regeneration_scope,
+                    "lineage_mode": "parallel",
+                }
+            )
         add_node(
             opportunity_id,
             kind="opportunity",
@@ -797,6 +863,14 @@ def _build_fixture_patch(stage_input: dict[str, Any]) -> dict[str, Any]:
         contradiction_id = opportunity.get("contradiction", {}).get("claim_id")
         if contradiction_id is not None:
             add_edge(str(contradiction_id), opportunity_id, "contradicts")
+        if opportunity.get("target_node_id") is not None:
+            target_opportunity_id = str(opportunity["target_node_id"])
+            successor_by_target[target_opportunity_id] = opportunity_id
+            lineage_operation_by_successor[opportunity_id] = add_edge(
+                target_opportunity_id,
+                opportunity_id,
+                "evolves_into",
+            )
 
         for assumption in opportunity.get("assumptions") or []:
             assumption_id = str(assumption["id"])
@@ -841,6 +915,44 @@ def _build_fixture_patch(stage_input: dict[str, Any]) -> dict[str, Any]:
             },
         )
         add_edge(opportunity_id, experiment_id, "requires_validation")
+
+    if operation == "regenerate_stale":
+        copyable_constraint_fields = {
+            "category",
+            "context_scope",
+            "description",
+            "notes",
+            "pinned",
+            "summary",
+            "tags",
+        }
+        for spec in parallel_constraint_clone_specs(stage_input, successor_by_target):
+            constraint = spec["constraint"]
+            constraint_id = str(spec["constraint_id"])
+            successor_id = str(spec["successor_id"])
+            original_metadata = constraint.get("metadata") or {}
+            clone_metadata = {
+                field: deepcopy(original_metadata[field])
+                for field in sorted(copyable_constraint_fields)
+                if field in original_metadata
+            }
+            clone_metadata.update(
+                {
+                    "generated_by_run_id": run_id,
+                    "provenance_node_ids": [constraint_id],
+                    "review_status": "provisional",
+                }
+            )
+            clone_id = f"{constraint_id}.parallel_for.{successor_id}"
+            add_node(
+                clone_id,
+                kind="constraint",
+                title=str(constraint["title"]),
+                body=constraint.get("body"),
+                metadata=clone_metadata,
+                branch_root_node_id=successor_id,
+                additional_dependencies=(lineage_operation_by_successor[successor_id],),
+            )
 
     regeneration_target_ids = sorted(
         str(target["node_id"]) for target in target_workset if target.get("node_id")

@@ -34,6 +34,8 @@ CSRF_TRUSTED_ORIGINS = [
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "proofgraph.graph",
+    "proofgraph.demo",
+    "proofgraph.evaluation",
     "proofgraph.generation",
     "proofgraph.runtime",
 ]
@@ -48,6 +50,15 @@ GENERATION_SSE_HEARTBEAT_SECONDS = 15.0
 GENERATION_CACHE_CLEANUP_SECONDS = 60.0
 GENERATION_FIXTURE_ROOT = BASE_DIR / "fixtures" / "security-questionnaires" / "v1"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+DEMO_PUBLIC_MODE = env_bool(os.environ.get("DEMO_PUBLIC_MODE"), default=False)
+DEMO_COOKIE_NAME = "proofgraph_demo_session"
+DEMO_SESSION_SECONDS = 86_400
+DEMO_QUOTA_WINDOW_SECONDS = 3_600
+DEMO_SESSION_HYBRID_RUN_LIMIT = 12
+DEMO_SESSION_CONCURRENT_RUN_LIMIT = 2
+DEMO_GLOBAL_HYBRID_RUN_LIMIT = 120
+DEMO_CLEANUP_BATCH_SIZE = 100
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

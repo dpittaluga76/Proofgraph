@@ -8,11 +8,18 @@ from pathlib import Path
 import pytest
 from django.conf import settings
 from django.db import transaction
+from django.test import Client
 
 from proofgraph.generation.composition import build_production_composition
 from proofgraph.generation.execution import process_claimed_run
 from proofgraph.generation.fixtures import FixtureBundle, StrictFixtureProviders
-from proofgraph.generation.models import GenerationEventType, GenerationRun, RunStatus
+from proofgraph.generation.models import (
+    GenerationEventType,
+    GenerationRun,
+    PatchDecision,
+    PatchStatus,
+    RunStatus,
+)
 from proofgraph.generation.ports import ProviderStageRequest
 from proofgraph.generation.provider_errors import ProviderExecutionError
 from proofgraph.generation.queue import claim_run
@@ -899,6 +906,58 @@ def test_replay_synthesis_produces_three_critiqued_traceable_opportunities(monke
         for edge in family_edges
     )
 
+    client = Client()
+    preview_response = client.get(f"/api/graph-patches/{run.patch.id}")
+    assert preview_response.status_code == 200, preview_response.json()
+    preview = preview_response.json()["patch"]
+    assert preview["status"] == PatchStatus.PENDING
+    opportunity_reviews = [
+        operation["review"]
+        for operation in preview["operations"]
+        if operation["review"]["semantic_role"] == "opportunity"
+    ]
+    assert len(opportunity_reviews) == 3
+    assert all(
+        set(review["quality_dimensions"])
+        == {
+            "builder_fit",
+            "distribution_clarity",
+            "evidence_strength",
+            "novelty",
+            "operational_burden",
+            "technical_feasibility",
+        }
+        for review in opportunity_reviews
+    )
+    node_count = canvas.nodes.count()
+    edge_count = canvas.edges.count()
+
+    apply_response = client.post(
+        f"/api/graph-patches/{run.patch.id}/apply",
+        data=json.dumps({}),
+        content_type="application/json",
+    )
+
+    assert apply_response.status_code == 200, apply_response.json()
+    run.patch.refresh_from_db()
+    canvas.refresh_from_db()
+    assert run.patch.status == PatchStatus.APPLIED
+    assert run.patch.decisions.count() == len(run.patch.operations)
+    assert set(run.patch.decisions.values_list("decision", flat=True)) == {PatchDecision.ACCEPTED}
+    assert canvas.nodes.count() > node_count
+    assert canvas.edges.count() > edge_count
+    assert GraphOperation.objects.filter(
+        canvas=canvas,
+        actor_type="graph_patch",
+    ).count() == len(run.patch.operations)
+    applied_opportunities = Node.objects.filter(
+        canvas=canvas,
+        kind=NodeKind.OPPORTUNITY,
+        metadata__source_patch_id=str(run.patch.id),
+    )
+    assert applied_opportunities.count() == 3
+    assert not applied_opportunities.exclude(metadata__review_status="accepted").exists()
+
 
 def test_replay_regenerates_one_stale_strategy_production_unit(monkeypatch) -> None:
     canvas, target = regeneration_strategy_canvas()
@@ -912,6 +971,22 @@ def test_replay_regenerates_one_stale_strategy_production_unit(monkeypatch) -> N
     patch_output = run.stages.get(name="constructing_patch").output["output"]
     assert patch_output["regeneration_target_ids"] == [str(target.id)]
     assert patch_output["permitted_stale_resolution_ids"] == [str(target.id)]
+    successor = next(
+        operation
+        for operation in patch_output["operations"]
+        if operation["op"] == "ADD_NODE"
+        and operation["node"]["kind"] == "strategy"
+        and operation["node"]["metadata"].get("regenerated_from_node_id") == str(target.id)
+    )
+    assert successor["node"]["metadata"]["regeneration_scope"] == "node"
+    assert successor["node"]["metadata"]["lineage_mode"] == "parallel"
+    assert any(
+        operation["op"] == "ADD_EDGE"
+        and operation["edge"]["source_node_id"] == str(target.id)
+        and operation["edge"]["target_node_id"] == successor["client_generated_id"]
+        and operation["edge"]["kind"] == "evolves_into"
+        for operation in patch_output["operations"]
+    )
     assert run.stages.filter(status="completed").count() == 2
 
 
@@ -959,6 +1034,18 @@ def test_replay_regenerates_every_opportunity_family_target(monkeypatch, kind: s
 
 def test_replay_regenerates_stale_branch_in_dependency_order(monkeypatch) -> None:
     canvas, targets = regeneration_branch_canvas()
+    branch_constraint = Node.objects.create(
+        canvas=canvas,
+        kind=NodeKind.CONSTRAINT,
+        title="Keep reviewer approval",
+        body="Never remove the accountable reviewer.",
+        metadata={
+            "fixture_role": "constraint_reviewer_approval",
+            "context_scope": "branch",
+            "pinned": True,
+        },
+        branch_root=targets[0],
+    )
     run = execute_replay(
         monkeypatch,
         canvas,
@@ -978,6 +1065,31 @@ def test_replay_regenerates_stale_branch_in_dependency_order(monkeypatch) -> Non
     assert run.patch.permitted_stale_resolution_ids == target_ids
     assert run.stages.filter(status="completed").count() == 8
     assert run.events.filter(event_type=GenerationEventType.PATCH_READY).count() == 1
+    successor = next(
+        operation
+        for operation in patch_output["operations"]
+        if operation["op"] == "ADD_NODE"
+        and operation["node"]["kind"] == "strategy"
+        and operation["node"]["metadata"].get("regenerated_from_node_id") == str(targets[0].id)
+    )
+    lineage = next(
+        operation
+        for operation in patch_output["operations"]
+        if operation["op"] == "ADD_EDGE"
+        and operation["edge"]["source_node_id"] == str(targets[0].id)
+        and operation["edge"]["target_node_id"] == successor["client_generated_id"]
+        and operation["edge"]["kind"] == "evolves_into"
+    )
+    clone = next(
+        operation
+        for operation in patch_output["operations"]
+        if operation["op"] == "ADD_NODE"
+        and operation["node"]["kind"] == "constraint"
+        and operation["node"]["metadata"]["provenance_node_ids"] == [str(branch_constraint.id)]
+    )
+    assert clone["node"]["branch_root_node_id"] == successor["client_generated_id"]
+    assert lineage["operation_id"] in clone["depends_on"]
+    assert successor["operation_id"] in clone["depends_on"]
     branch_synthesis = run.stages.get(name="synthesizing").output["output"]
     assert any(
         evidence["claim_id"] == "claim_workaround_pain"

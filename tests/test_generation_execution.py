@@ -261,7 +261,9 @@ def test_cancellation_after_final_checkpoint_wins_before_patch_finalization(monk
 
 
 @override_settings(GENERATION_COMPOSITION_FACTORY=TEST_COMPOSITION)
-def test_branch_regeneration_executes_phase_local_batches_and_one_patch_unit_per_target() -> None:
+def test_branch_regeneration_executes_phase_local_batches_and_one_patch_unit_per_target(
+    caplog,
+) -> None:
     canvas, root, claims, request = make_branch_request("branch-execution")
     created = create_generation_run(canvas.id, request)
     lease = claim_run("branch-worker")
@@ -281,7 +283,8 @@ def test_branch_regeneration_executes_phase_local_batches_and_one_patch_unit_per
             return super().execute(**kwargs)
 
     composition = replace(phase2_test_composition(), executor=RecordingExecutor())
-    process_claimed_run(lease, composition=composition)
+    with caplog.at_level(logging.INFO, logger="proofgraph.generation"):
+        process_claimed_run(lease, composition=composition)
     run = GenerationRun.objects.get(pk=created.payload["run_id"])
     claim_ids = [str(claim.id) for claim in sorted(claims, key=lambda node: str(node.id))]
 
@@ -301,10 +304,16 @@ def test_branch_regeneration_executes_phase_local_batches_and_one_patch_unit_per
         NodeKind.CLAIM,
         NodeKind.CLAIM,
     ]
+    events = [json.loads(record.message) for record in caplog.records]
+    started = next(event for event in events if event["event"] == "regeneration.started")
+    assert started["regeneration_scope"] == "branch"
+    assert started["regeneration_workset_size"] == 3
+    assert started["regeneration_batch_sizes"] == {"claim_evidence": 2, "strategy": 1}
+    assert started["lineage_mode"] == "parallel"
 
 
 @override_settings(GENERATION_COMPOSITION_FACTORY=TEST_COMPOSITION)
-def test_branch_regeneration_retry_reuses_phase_checkpoints() -> None:
+def test_branch_regeneration_retry_reuses_phase_checkpoints(caplog) -> None:
     canvas, _root, _claims, request = make_branch_request("branch-resume")
     created = create_generation_run(canvas.id, request)
     first_lease = claim_run("branch-worker-a")
@@ -328,7 +337,9 @@ def test_branch_regeneration_retry_reuses_phase_checkpoints() -> None:
     assert retry_generation_run(run.id).status == 202
     second_lease = claim_run("branch-worker-b")
     assert second_lease is not None
-    process_claimed_run(second_lease)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="proofgraph.generation"):
+        process_claimed_run(second_lease)
     run.refresh_from_db()
 
     assert run.status == RunStatus.COMPLETED
@@ -338,6 +349,18 @@ def test_branch_regeneration_retry_reuses_phase_checkpoints() -> None:
     assert run.stages.get(name="clustering").attempt == 1
     assert len(run.patch.operations) == 3
     assert run.events.filter(event_type=GenerationEventType.RUN_RESUMED).count() == 1
+    reuse_events = [
+        json.loads(record.message)
+        for record in caplog.records
+        if json.loads(record.message).get("event") == "stage.reused"
+    ]
+    assert {(event["regeneration_phase"], event["stage"]) for event in reuse_events} == {
+        ("strategy", "planning"),
+        ("claim_evidence", "planning"),
+        ("claim_evidence", "researching"),
+    }
+    assert all(event["checkpoint_reused"] is True for event in reuse_events)
+    assert all(event["lineage_mode"] == "parallel" for event in reuse_events)
 
 
 @override_settings(GENERATION_COMPOSITION_FACTORY=TEST_COMPOSITION)

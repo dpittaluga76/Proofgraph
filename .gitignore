@@ -13,6 +13,9 @@ web/coverage/
 web/playwright-report/
 web/test-results/
 
+# Private/cost-bearing comparative evaluation artifacts
+evaluation/runs/
+
 .DS_Store
 Thumbs.db
 .idea/

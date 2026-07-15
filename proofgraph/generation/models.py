@@ -6,6 +6,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
+from proofgraph.demo.models import DemoSession
 from proofgraph.graph.models import Canvas, GraphOperation, Node
 
 
@@ -72,6 +73,13 @@ class GenerationRun(models.Model):
     canvas = models.ForeignKey(
         Canvas,
         db_constraint=False,
+        on_delete=models.DO_NOTHING,
+        related_name="generation_runs",
+    )
+    demo_session = models.ForeignKey(
+        DemoSession,
+        blank=True,
+        null=True,
         on_delete=models.DO_NOTHING,
         related_name="generation_runs",
     )
@@ -156,6 +164,11 @@ class GenerationRun(models.Model):
                 fields=["lease_expires_at", "created_at", "id"],
                 condition=Q(status=RunStatus.RUNNING),
                 name="run_expired_lease_idx",
+            ),
+            models.Index(
+                fields=["demo_session", "status"],
+                condition=Q(status__in=[RunStatus.QUEUED, RunStatus.RUNNING]),
+                name="run_demo_active_idx",
             ),
         ]
 

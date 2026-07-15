@@ -4,45 +4,21 @@ This backlog is derived from `design.md`, which is the source of truth. Tasks ar
 
 ## Current Goal
 
-Deliver **Phase 4: Patch review and dependency-aware regeneration** on top of the completed intelligence pipeline.
+Continue **Phase 5: Demo hardening, evaluation, and delivery** with comparative evaluation.
 
-Current phase exit criteria:
+Current phase entry criteria:
 
-- Candidate patches are previewable and selectively reviewable with dependency closure.
-- Accepted operations apply transactionally with optimistic conflict detection and complete audit decisions.
-- Graph mutations propagate staleness directionally and regeneration preserves explicit lineage.
+- Phase 4 patch review, transactional application, dependency-aware invalidation, and always-parallel regeneration are complete.
+- The local PostgreSQL, backend, frontend, and browser verification gates pass.
+- PG-026 delivers the isolated, resettable, quota-protected anonymous demo locally.
 
-Next task: **PG-021**.
+Current implementation task: **PG-027**. The live 20-scenario generation and independent rating run remains an explicit cost-bearing/manual gate after the deterministic harness is implemented.
 
 ## Pending
 
 ### Decision gates
 
 Decision tasks are listed before their dependents. Each completed decision must be recorded in `design.md` or a linked architecture decision and moved to **Done**.
-
-#### DQ-002 — Choose how rejected evidence remains visible for auditability
-
-**Depends on:** None
-
-**Outcome:** Select muted-visible or hidden-by-default presentation without changing the fixed rejection, exclusion, and invalidation semantics.
-
-**Done when:** The decision, rationale, accessibility behavior, and canvas acceptance criteria are recorded for PG-024.
-
-#### DQ-004 — Choose replace-versus-parallel stale-branch regeneration
-
-**Depends on:** None
-
-**Outcome:** Define whether regenerated stale work replaces the old branch or creates a parallel branch.
-
-**Done when:** The decision records provenance, undo/audit, branch comparison, and patch behavior required by PG-023 and PG-024.
-
-#### DQ-006 — Choose internal-only or product-UI evaluation harness
-
-**Depends on:** None
-
-**Outcome:** Decide where benchmark results run and appear.
-
-**Done when:** The design records the audience, data exposure, UI scope if any, and acceptance criteria for PG-027.
 
 #### DQ-007 — Select the final product name
 
@@ -54,96 +30,20 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 ### Phase 1 — Graph foundation
 
-### Phase 4 — Patch review and dependency-aware regeneration
-
-#### PG-023 — Implement transitive staleness and explicit regeneration
-
-**Depends on:** PG-022, DQ-004, DQ-005
-
-**Outcome:** Mark dependent descendants stale after premise changes and regenerate only when the user explicitly requests it.
-
-**Done when:**
-
-- Editing/removing an upstream premise propagates stale state transitively using the design's explicit per-edge dependency direction table and writes operation-linked causes in the relational ledger.
-- The first fresh-to-stale transition increments semantic version once and invalidates token metadata; additional active causes do not increment again, and system stale transitions never recursively seed a second propagation.
-- Rejecting previously accepted evidence is one canvas-first transaction that records review status and operation, recalculates support eligibility, rejects solely supported claims, updates multiply supported claims, propagates staleness, writes causes, and rolls back as a unit on failure.
-- Propagation is a cycle-safe breadth-first traversal with a visited set; converging paths do not duplicate targets or version bumps and the origin is not re-marked through a cycle.
-- Staleness never triggers automatic recursive generation.
-- Node scope normalizes the selected stale root to one strategy, claim/provenance, or opportunity-family production unit and executes only its target-localized plan.
-- Branch scope executes the frozen, deduplicated workset as checkpointed strategy, evidence, and opportunity batches in design order, feeds provisional earlier-batch results into later batches, and performs one final patch-construction stage.
-- Regeneration output cardinality is exactly one candidate per frozen target production unit; the default three-strategy/three-opportunity cardinality is not reused for stale regeneration.
-- Composite checkpoint keys include phase, stable target set, and input hash; retry resumes completed batches, while failure/cancellation exposes no partial graph mutation.
-- Regenerated output is one candidate patch declaring every target production unit and permitted stale resolution; unrelated branches are absent.
-- Applying a replacement patch clears causes only for declared reused targets with one combined semantic-version increment, removes causes with declared deleted targets, and creates replacement nodes fresh; parallel mode leaves old causes active and creates fresh successors according to **DQ-004**. Manual edits never clear staleness implicitly.
-- Backend operations support audited assumption replacement, retained branch lineage, and branch comparison according to **DQ-004**; unsupported/user-authored/source/placeholder/non-stale regeneration roots return `422` rather than guessing.
-- Regeneration context selection implements the explicit-neighborhood or semantic-similarity policy selected in **DQ-005**.
-- Stale-regeneration telemetry records scope, workset and batch sizes, checkpoint reuse, cancellation/failure, patch ID, accepted resolution count, and lineage mode with run/canvas identifiers.
-- Tests cover every edge kind and direction, pre-delete and changed-edge relationships, cycles, converging paths, multiple causes, exact version transitions, rollback-safe evidence rejection, independent support, node-local regeneration, composite checkpoint/resume/cancel, assumption replacement, and parallel/replacement clearing and lineage.
-
-#### PG-024 — Implement generation placeholders and resilient progress UX
-
-**Depends on:** PG-009, PG-020, PG-021, PG-023, DQ-002, DQ-004
-
-**Outcome:** Represent work in progress without presenting placeholders as real ideas or leaving indefinite loading state.
-
-**Done when:**
-
-- A placeholder is explicitly ephemeral and tied to one run, or is rendered as a non-persisted overlay.
-- Schema-valid extraction batches appear progressively as provisional evidence and are clearly distinguished from accepted graph nodes.
-- Rejected evidence follows the muted-or-hidden presentation selected in **DQ-002** without changing its fixed exclusion and invalidation semantics.
-- The canvas exposes audited actions to reject previously accepted evidence, replace an assumption, and compare retained branches; disabled states explain when lineage or dependency prerequisites are unavailable.
-- Completion removes/replaces the placeholder with patch preview.
-- Failure, cancellation, lease loss, and retry clear loading state while preserving canvas edits.
-- Reconnecting to SSE reconstructs the correct current progress state.
-
-#### PG-025 — Verify patch review and regeneration end to end
-
-**Depends on:** PG-022, PG-023, PG-024
-
-**Outcome:** Prove the graph provides provenance, branching, invalidation, and review behavior that a chat transcript cannot.
-
-**Done when:**
-
-- End-to-end tests cover critique-to-preview-to-transactional-apply.
-- Opportunity preview and applied-node inspection show every required quality dimension separately plus distribution and defensibility rationale.
-- Editing or deleting an input visibly marks every dependent descendant stale.
-- A user can compare parallel branches and replace an assumption through audited graph operations.
-- Explicit composite branch regeneration produces one patch, resumes from completed batch checkpoints after failure, leaves unrelated branches unchanged, and clears stale causes only for accepted replacement targets.
-- Evidence rejection remains auditable, excludes rejected evidence from later context, marks dependent descendants stale, and preserves independently supported claims.
-- Patch conflict recovery, per-operation decision audit, partial acceptance, cancellation, and reload preserve authoritative state.
-- The canonical journey satisfies MVP acceptance criteria 1–14 locally.
-
 ### Phase 5 — Demo hardening, evaluation, and delivery
-
-#### PG-026 — Deliver the seeded judge-facing demo experience
-
-**Depends on:** PG-025, DQ-008
-
-**Outcome:** Make the canonical workflow reliable without private setup.
-
-**Done when:**
-
-- Demo opportunity decision **DQ-008** is resolved and represented by a seeded canonical canvas and immutable fixture bundle.
-- `demo_hybrid_v1` is the primary judge-facing profile and `replay_v1` is an explicit emergency fallback.
-- A one-click reset restores the known starting state.
-- Migrations create PostgreSQL-backed `demo_session` and global quota-window state, enforce unique active-canvas ownership, link demo runs to their session independently of reset, and add active-run/session-expiry indexes from design section 12.14; the browser receives a signed HttpOnly SameSite cookie and mutating requests retain Django CSRF protection.
-- Every anonymous visitor receives an isolated clone of the seeded canvas, and reset replaces only that session's active clone under concurrent requests.
-- Sessions expire 24 hours after creation; reset neither extends expiry nor resets quota, cookie expiry matches server expiry, bootstrap GET creates a new isolated session after expiry, and expired API requests return `demo_session_expired` without performing work.
-- A bounded `SKIP LOCKED` cleanup path cancels nonterminal work, respects lease fencing, deletes expired canvas data through DQ-003, and removes the session only after its runs are terminal or fenced.
-- Every canvas, graph-operation, run status/cancel/retry, SSE, patch get/apply/reject/regenerate, source, and ingestion endpoint resolves the signed session and returns non-enumerating `404` for cross-session or retired-canvas resources.
-- Anonymous requests may select only `demo_hybrid_v1` or `replay_v1`; `live_v1` and unregistered profiles are rejected server-side.
-- Hybrid usage is limited to twelve runs per session per one-hour window, at most two concurrent runs, and 120 global runs per one-hour window; counters update atomically before queueing.
-- Quota exhaustion returns `429` and may offer an explicit replay switch without silently changing the stored execution profile.
-- Cached evidence is labeled as previously retrieved and visually distinguished from live GPT-5.6 reasoning.
-- The flow requires no account; all provider credentials remain server-managed.
-- This component emits demo-session creation/expiry/cleanup, reset, profile rejection, per-session/global quota rejection, circuit-breaker, and replay-switch telemetry with session/run/canvas/profile identifiers.
-- Tests cover session forgery, cross-session read and mutation denial for every resource family, expired-cookie bootstrap versus API behavior, concurrent cleanup/lease fencing, CSRF, concurrent quota races, profile allowlisting, global circuit breaking, unique canvas ownership, and reset without expiry or quota evasion.
 
 #### PG-027 — Build the comparative evaluation harness
 
 **Depends on:** PG-019, PG-020, DQ-006
 
 **Outcome:** Measure whether orchestration materially beats generic brainstorming.
+
+**Progress (July 15, 2026):** The internal deterministic harness is implemented with 20 versioned
+synthetic scenarios, the four frozen GPT-5.6 structured-output paths, resumable private generation,
+per-scenario blinding, two independent rating templates, exact disagreement adjudication, and
+10,000-resample paired bootstrap reporting. The explicit paid 200-call generation run, two completed
+independent ratings, adjudication of observed disagreements, and the numerical acceptance result
+remain open; therefore PG-027 stays in Pending.
 
 **Done when:**
 
@@ -212,11 +112,92 @@ Decision tasks are listed before their dependents. Each completed decision must 
 - Replay fallback and failure-recovery procedures are rehearsed.
 - Final submission artifacts and links, including the primary implementation Project task's `/feedback` Session ID, are checked against the official rules.
 
-## In Progress
-
-None.
-
 ## Done
+
+### DQ-006 — Keep the evaluation harness internal
+
+**Completed:** July 15, 2026
+
+**Depends on:** None
+
+**Outcome:** The benchmark is a command-line, Git-reviewable workflow for maintainers, two blinded raters, and submission reviewers. It adds no product UI and exposes no variant identities, rater identities, evaluation credentials, or raw provider metadata to anonymous demo visitors. Versioned synthetic scenarios and summarized results may live in the repository; private variant maps remain separate from blind packets and rating templates.
+
+**Done when:** `design.md` section 23.6 and decision DQ-006 record the audience, data exposure, zero product-UI scope, four frozen variants, deterministic artifact split, adjudication semantics, cost-bearing generation boundary, and unchanged numerical acceptance criteria for PG-027.
+
+### PG-026 — Deliver the seeded judge-facing demo experience
+
+**Completed:** July 15, 2026
+
+**Depends on:** PG-025, DQ-008
+
+**Outcome:** Made the canonical workflow locally reliable without an account or private browser setup. Public mode bootstraps each visitor into an isolated canonical seed, defaults to hybrid reasoning, exposes deterministic replay explicitly, and restores the seed with one reset action.
+
+**Done when:**
+
+- Demo opportunity decision **DQ-008** is resolved and represented by a seeded canonical canvas and immutable fixture bundle.
+- `demo_hybrid_v1` is the primary judge-facing profile and `replay_v1` is an explicit emergency fallback.
+- A one-click reset restores the known starting state.
+- Migrations create PostgreSQL-backed `demo_session` and global quota-window state, enforce unique active-canvas ownership, link demo runs to their session independently of reset, and add active-run/session-expiry indexes from design section 12.14; the browser receives a signed HttpOnly SameSite cookie and mutating requests retain Django CSRF protection.
+- Every anonymous visitor receives an isolated clone of the seeded canvas, and reset replaces only that session's active clone under concurrent requests.
+- Sessions expire 24 hours after creation; reset neither extends expiry nor resets quota, cookie expiry matches server expiry, bootstrap GET creates a new isolated session after expiry, and expired API requests return `demo_session_expired` without performing work.
+- A bounded `SKIP LOCKED` cleanup path cancels nonterminal work, respects lease fencing, deletes expired canvas data through DQ-003, and removes the session only after its runs are terminal or fenced.
+- Every canvas, graph-operation, run status/cancel/retry, SSE, patch get/apply/reject/regenerate, source, and ingestion endpoint resolves the signed session and returns non-enumerating `404` for cross-session or retired-canvas resources.
+- Anonymous requests may select only `demo_hybrid_v1` or `replay_v1`; `live_v1` and unregistered profiles are rejected server-side.
+- Hybrid usage is limited to twelve runs per session per one-hour window, at most two concurrent runs, and 120 global runs per one-hour window; counters update atomically before queueing.
+- Quota exhaustion returns `429` and offers an explicit replay switch without silently changing the stored execution profile.
+- Cached evidence is labeled as previously retrieved and visually distinguished from live GPT-5.6 reasoning.
+- The flow requires no account; all provider credentials remain server-managed.
+- This component emits demo-session creation/expiry/cleanup, reset, profile rejection, per-session/global quota rejection, circuit-breaker, and replay-switch telemetry with session/run/canvas/profile identifiers.
+- Tests cover session forgery, cross-session read and mutation denial for every resource family, expired-cookie bootstrap versus API behavior, concurrent cleanup/lease fencing, CSRF, concurrent quota races, profile allowlisting, global circuit breaking, unique canvas ownership, and reset without expiry or quota evasion.
+
+**Verification:** Migrations apply with no model drift; Django checks, Ruff formatting/lint, and the production frontend build pass. All 260 PostgreSQL-backed backend tests and 29 frontend unit/component tests pass. Three live Playwright journeys pass, including the anonymous seed/bootstrap/reset path, explicit hybrid-to-replay selection, retired-canvas denial, durable Phase 4 invalidation, and the Phase 1 graph journey. Representative query plans use the demo active-run and expiry indexes without sequential scans. The live browser gate found and fixed duplicate session creation under React Strict Mode by coalescing concurrent bootstrap requests.
+
+### PG-025 — Verify patch review and regeneration end to end
+
+**Completed:** July 15, 2026
+
+**Depends on:** PG-022, PG-023, PG-024
+
+**Outcome:** Prove the graph provides provenance, branching, invalidation, and review behavior that a chat transcript cannot.
+
+**Done when:**
+
+- End-to-end tests cover critique-to-preview-to-transactional-apply.
+- Opportunity preview and applied-node inspection show every required quality dimension separately plus distribution and defensibility rationale.
+- Editing or deleting an input visibly marks every dependent descendant stale.
+- A user can compare parallel branches and replace an assumption through audited graph operations.
+- Explicit composite branch regeneration produces one patch, resumes from completed batch checkpoints after failure, leaves unrelated branches unchanged, and preserves all old-branch stale causes while creating fresh linked successors.
+- Evidence rejection remains auditable, excludes rejected evidence from later context, marks dependent descendants stale, and preserves independently supported claims.
+- Patch conflict recovery, per-operation decision audit, partial acceptance, cancellation, and reload preserve authoritative state.
+- The canonical journey satisfies MVP acceptance criteria 1–14 locally.
+
+**Verification:** PostgreSQL migrations, migration-drift detection, and database readiness pass. Ruff formatting and lint pass; all 248 backend tests pass; the frontend formatting, lint, source/e2e typecheck, 26 unit/component tests, and production build pass; and both live PostgreSQL-backed Playwright journeys pass. The Phase 4 browser journey verifies durable visible invalidation across a four-level dependency chain and reload, while backend replay, checkpoint-resume, cancellation, conflict, evidence-rejection, transactional-apply, lineage, and SSE tests cover MVP criteria 1–14. The gate also found and fixed PostgreSQL JSON-key filtering that had excluded manually created descendants without a `review_status` key from invalidation.
+
+### Phase 4 dependency-aware regeneration and progress UX — PG-023 and PG-024
+
+**Completed:** July 15, 2026
+
+**Depends on:** PG-009, PG-020, PG-021, PG-022, DQ-002, DQ-004, DQ-005
+
+**Outcome:** Added durable transitive invalidation, explicit node/branch regeneration, always-parallel successor lineage, cloned branch constraints, rejected-evidence and assumption-replacement audit actions, resilient canvas-wide progress replay, provisional evidence overlays, pending patch handoff, and retained-branch comparison.
+
+**Done when:**
+
+- Every semantic node/edge mutation uses the explicit dependency-direction table, preserves operation-linked causes, increments only the first fresh-to-stale transition, and never starts generation automatically.
+- Evidence rejection recalculates support atomically, preserves independently supported claims, excludes rejected material from later context, and invalidates all dependent descendants including direct source-to-opportunity dependencies.
+- Node and branch regeneration freeze target-local worksets, resume checkpointed batches, emit exactly one successor per production root, and produce one add-only candidate patch.
+- Applying regeneration follows DQ-004: old stale nodes and active causes remain untouched; successors carry canonical parallel metadata and old-to-new lineage; anchored branch constraints are cloned; partial review keeps each lineage group atomic.
+- Unsupported, manually authored, source, placeholder, fresh, or otherwise ineligible regeneration selections return `422`.
+- One replayable SSE stream per canvas reconstructs run progress, shows clearly provisional run-owned evidence, opens only current pending previews, and clears loading on completion, failure, cancellation, lease loss, or retry.
+- Rejected evidence stays visible and accessible; audited rejection, assumption replacement, regeneration, and canonical retained-branch comparison expose prerequisite-aware disabled states.
+
+**Verification:** Initial focused verification covered backend compilation, strict pipeline/provider contracts, fixture integrity, and the complete frontend gate. The later unrestricted PostgreSQL, Ruff, full-suite, and Playwright phase-exit results are recorded under completed PG-025.
+
+### Phase 4 design decisions — DQ-002 and DQ-004
+
+**Completed:** July 15, 2026
+
+**Outcome:** Selected accessible muted-visible rejected evidence and always-parallel stale regeneration. `design.md` now fixes presentation, provenance, undo/audit, branch comparison, constraint cloning, patch dependency, and old-cause preservation semantics for PG-023 and PG-024.
 
 ### Phase 4 patch review and transactional apply — PG-021 and PG-022
 

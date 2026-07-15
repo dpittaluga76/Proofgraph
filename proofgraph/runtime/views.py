@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings
 from django.db import DatabaseError, connection
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -22,4 +23,10 @@ def health(_request: HttpRequest) -> JsonResponse:
             status=503,
         )
 
-    return JsonResponse({"status": "ok", "database": "ok"})
+    return JsonResponse(
+        {
+            "status": "ok",
+            "database": "ok",
+            "demo_mode": settings.DEMO_PUBLIC_MODE,
+        }
+    )

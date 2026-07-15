@@ -7,6 +7,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandParser
 from django.db import close_old_connections, connection, reset_queries
 
+from proofgraph.demo.cleanup import cleanup_expired_demo_sessions
 from proofgraph.generation.execution import process_claimed_run
 from proofgraph.generation.queue import LeaseKeeper, claim_run
 from proofgraph.generation.research_cache import delete_expired_cache_entries
@@ -54,6 +55,7 @@ class Command(BaseCommand):
             now = time.monotonic()
             if now >= next_cache_cleanup:
                 delete_expired_cache_entries()
+                cleanup_expired_demo_sessions()
                 next_cache_cleanup = now + settings.GENERATION_CACHE_CLEANUP_SECONDS
             lease = claim_run(worker_id)
             if lease is None:

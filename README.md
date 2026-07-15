@@ -2,13 +2,48 @@
 
 An evidence-native canvas for discovering defensible software opportunities.
 
-The **Phase 3 intelligence pipeline**, through **PG-020**, is implemented and verified; the next implementation phase begins with **PG-021**. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
+**Phase 5 is in progress: PG-026's isolated judge-facing demo is complete, and PG-027's deterministic comparative-evaluation harness is implemented.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark now freezes 20 synthetic scenarios, four generation variants, blind packet preparation, two-rater adjudication, and paired bootstrap reporting. The paid generation and independent human-rating run has not been executed, so PG-027's numerical acceptance gate remains open. Observability aggregation, deployment, and submission work also remain. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
 
 The PostgreSQL schema persists canvases, typed nodes and edges, append-only graph operations, and operation-linked staleness causes. Localized canvas operations provide optimistic semantic, position, and edge versions; idempotent retries; audited constraint anchoring; explicit dependency conflicts; and incremental revision replay. Database constraints and triggers enforce the frozen graph taxonomy, same-canvas references, branch-scoped constraint anchors, actor-scoped idempotency keys, and exact stale/cause consistency.
 
-The browser workspace can create or reopen canvases, add and edit fixed graph types, connect nodes, configure global or branch-scoped constraints, persist drag movement, resolve deletion dependencies through visible audited operations, and save a deterministic auto-layout. Django's health endpoint issues the CSRF cookie used by browser mutations.
+The browser workspace can create or reopen canvases, add and edit fixed graph types, connect nodes, configure global or branch-scoped constraints, persist drag movement, resolve deletion dependencies through visible audited operations, and save a deterministic auto-layout. Phase 4 adds one replayable generation stream per canvas, provisional run-owned evidence overlays, pending patch handoff, visible rejected evidence, stale node/branch regeneration, audited assumption replacement, and canonical retained-branch comparison. In Phase 5 public mode, the welcome screen is replaced by automatic anonymous bootstrap into the security-questionnaire seed, the toolbar exposes reset instead of arbitrary canvas switching, and the UI distinguishes previously retrieved evidence, live GPT-5.6 reasoning, and deterministic replay. Django's health endpoint issues the CSRF cookie used by browser mutations.
 
-The generation domain persists idempotent, version-checked runs; immutable stage checkpoints; fenced worker leases; candidate patches; and canvas-scoped progress events. Phase 3 adds deterministic operation-specific context packing, strict structured planning/extraction/synthesis/critique/patch schemas, bounded research adapters, evidence clustering, and immutable replay fixtures. Product requests may select `live_v1`, `demo_hybrid_v1`, or `replay_v1`; the Phase 2 `phase2_test_v1` adapter remains injectable only in tests and is unreachable through the product resolver.
+The generation domain persists idempotent, version-checked runs; immutable stage checkpoints; fenced worker leases; candidate patches; and canvas-scoped progress events. Phase 3 adds deterministic operation-specific context packing, strict structured planning/extraction/synthesis/critique/patch schemas, bounded research adapters, evidence clustering, and immutable replay fixtures. Phase 4 adds explicit target-local regeneration plans and add-only patches whose fresh successors retain the stale branch through audited old-to-new lineage. Product requests may select `live_v1`, `demo_hybrid_v1`, or `replay_v1`; anonymous sessions are restricted to hybrid and replay, while the Phase 2 `phase2_test_v1` adapter remains injectable only in tests and is unreachable through the product resolver.
+
+## Implementation status
+
+| Phase | Status | Delivered |
+|---|---|---|
+| Phase 1 — Graph foundation | Complete | PostgreSQL graph schema, localized audited operations, semantic/position versions, canvas UI, deterministic layout, and optimistic conflict recovery |
+| Phase 2 — Durable jobs | Complete | PostgreSQL queue, fenced worker leases, immutable checkpoints, retry/cancellation, candidate patches, and replayable canvas SSE |
+| Phase 3 — Intelligence pipeline | Complete | Explicit-neighborhood context, structured generation stages, bounded research, evidence clustering, production profiles, and immutable fixtures |
+| Phase 4 — Patch review | Complete and locally verified through PG-025 | Dependency-closed review, transactional apply, evidence rejection, durable staleness, explicit always-parallel regeneration, progress UX, and retained-branch comparison |
+| Phase 5 — Demo hardening and delivery | In progress; PG-026 complete, PG-027 harness ready | Seeded anonymous demo, isolation, reset, quotas, and browser journey delivered; internal 20-scenario generation/blinding/adjudication/bootstrap workflow implemented; paid two-rater result through final submission remains |
+
+`TASKS.md` is the implementation queue. **DQ-006 is resolved**: the benchmark remains an internal command-line workflow with no product-UI scope. **PG-027 is active** until the explicit paid generation, two independent blinded ratings, required adjudications, and numerical acceptance thresholds are complete. “Complete” above means implemented and verified in the local PostgreSQL-backed repository; it does not mean publicly deployed.
+
+### Current boundaries
+
+- The isolated anonymous demo is implemented and verified locally, but no public environment has been deployed yet.
+- The comparative evaluation harness is implemented and locally testable; its paid generation and independent two-rater result remain tracked by PG-027. Production observability aggregation, public deployment, hackathon packaging, and final demo acceptance remain tracked by PG-028 through PG-031.
+- `replay_v1` is a strict canonical-fixture profile, not a general offline model. Inputs that do not match a committed semantic fixture fail explicitly with `fixture_input_mismatch`.
+- `live_v1` and the live stages of `demo_hybrid_v1` require a server-side `OPENAI_API_KEY`. Browser code never receives provider credentials.
+
+## Repository map
+
+| Path | Responsibility |
+|---|---|
+| `proofgraph/graph/` | Canvas, node, edge, operation, staleness, lifecycle, and graph telemetry domain |
+| `proofgraph/demo/` | Anonymous session authorization, canonical seed, reset, quotas, cleanup, and demo telemetry |
+| `proofgraph/evaluation/` | Internal structured generation, deterministic blinding, rating validation, adjudication, and paired bootstrap analysis |
+| `proofgraph/generation/` | Run APIs, queue, context packing, providers, research, fixtures, SSE, patch review/application, and generation telemetry |
+| `proofgraph/runtime/` | Health check and generation-worker management commands |
+| `fixtures/security-questionnaires/v1/` | Immutable canonical replay assets and semantic-input commitments |
+| `evaluation/` | Versioned synthetic benchmark scenarios and the private-artifact workflow guide |
+| `web/` | Isolated React/Vite workspace, component tests, and Playwright journeys |
+| `tests/` | PostgreSQL-backed unit, integration, replay, concurrency, lifecycle, and phase-flow tests |
+| `design.md` | Architecture and product source of truth |
+| `TASKS.md` | Dependency-ordered implementation tracker; completed work moves to Done |
 
 ## Prerequisites
 
@@ -36,7 +71,7 @@ Set-Location ..
 
 `check_database` must report the configured PostgreSQL database and user. The default Compose port is `55432` to avoid colliding with a system PostgreSQL installation; override it with `POSTGRES_PORT` and update `DATABASE_URL` together.
 
-`replay_v1` works without external credentials. Set `OPENAI_API_KEY` to enable `live_v1` and `demo_hybrid_v1`. A GitHub token and Stack Exchange key are optional but increase their public API allowances; never expose any provider credential to the browser client.
+`replay_v1` works without external credentials. Set `OPENAI_API_KEY` to enable `live_v1` and `demo_hybrid_v1`. A GitHub token and Stack Exchange key are optional but increase their public API allowances; never expose any provider credential to the browser client. The checked-in example enables `DEMO_PUBLIC_MODE=true`; set it to `false` when you need the unrestricted local operator welcome/create/open workflow.
 
 ## Run the three local components
 
@@ -61,7 +96,7 @@ Set-Location web
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. Vite proxies `/api` to Django. The page reports readiness only when Django can execute a PostgreSQL query. You can inspect the same result directly:
+Open `http://127.0.0.1:5173`. With `DEMO_PUBLIC_MODE=true`, Vite proxies `/api` to Django and the browser opens directly into a private seeded demo. With public mode off, use `http://127.0.0.1:5173/?demo=1` to verify the same demo flow locally without changing server configuration. The page reports readiness only when Django can execute a PostgreSQL query. You can inspect the same result directly:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/health
@@ -73,13 +108,69 @@ For a non-blocking worker startup check:
 uv run python manage.py run_generation_worker --once
 ```
 
-`--once` processes at most one eligible run. Normal workers claim PostgreSQL rows with `FOR UPDATE SKIP LOCKED`, keep a 60-second fenced lease alive every 12 seconds on a dedicated database connection, physically delete expired research and source-content cache rows at startup and every 60 seconds, and recycle after 50 jobs or four hours.
+`--once` processes at most one eligible run. Normal workers claim PostgreSQL rows with `FOR UPDATE SKIP LOCKED`, keep a 60-second fenced lease alive every 12 seconds on a dedicated database connection, physically delete expired research/source-content cache rows and bounded batches of expired demo sessions at startup and every 60 seconds, and recycle after 50 jobs or four hours.
+
+## Phase 5 anonymous demo
+
+`GET /api/demo/bootstrap` validates the signed HttpOnly SameSite cookie or creates a new 24-hour `demo_session` and isolated clone of the DQ-008 security-questionnaire canvas. The cookie expires with the server session. An invalid or expired cookie on bootstrap rotates to a new session; an expired cookie on any resource API returns `demo_session_expired` without doing work. React development-mode duplicate effects share one in-flight bootstrap request, preventing accidental double-session creation.
+
+`POST /api/demo/reset` is the one-click restore path. It keeps the original session expiry and quota window, fences and terminalizes nonterminal work, swaps in a new canonical clone under the session lock, and deletes the retired canvas through the same authoritative lifecycle as direct deletion. Retired or cross-session canvas, operation, run, SSE, patch, source, and ingestion identifiers return the same non-enumerating `404`. Mutations retain Django CSRF validation.
+
+Anonymous generation defaults to `demo_hybrid_v1`, which uses canonical fixture planning/research/extraction and live GPT-5.6 synthesis/critique/patch construction. `replay_v1` remains a visible, user-selected full-fixture fallback; the server never silently changes the stored profile. Anonymous `live_v1`, test, and unknown profiles are rejected. Hybrid cost controls allow 12 runs per session per one-hour window, at most two active hybrid runs per session, and 120 global hybrid runs per clock-hour window. Counters and run creation commit atomically; a `429` includes `replay_v1` as the explicit fallback.
+
+Expired-session cleanup claims at most 100 sessions per pass with `FOR UPDATE SKIP LOCKED`. Queued or expired-lease work is fenced and terminalized; a live worker receives cancellation and retains ownership until its lease is safely fenced. Only then are the canvas and session deleted. Demo telemetry covers creation, expiry, cleanup, reset, rejected profiles, session/concurrent/global quota rejection, the global circuit breaker, and replay selection.
+
+### Local judge path
+
+1. Start PostgreSQL, Django, the worker, and Vite with `DEMO_PUBLIC_MODE=true`, then open `http://127.0.0.1:5173`—no account or canvas ID is required.
+2. Confirm the seeded goal and three pinned constraints, open generation controls, and leave the instruction blank so the canonical fixture identity remains exact.
+3. Keep the default **Hybrid live reasoning** profile when `OPENAI_API_KEY` is configured, or explicitly choose **Deterministic replay** for the no-provider path.
+4. Select the goal and all three constraints, start generation, follow the durable progress stream, review the candidate patch, and apply the desired dependency-closed operations.
+5. Use **Reset demo** at any point to return only this visitor's session to a fresh seed without extending expiry or restoring hybrid quota.
+
+## Phase 5 comparative evaluation
+
+PG-027 remains an internal benchmark; it adds no application route or browser control. The checked-in
+`evaluation/scenarios.v1.json` contains 20 synthetic builder scenarios with explicit constraints,
+advantages, preferences, and evidence limitations. The harness normalizes all variants to three
+opportunities under one GPT-5.6 model and output budget:
+
+- `generic`: direct opportunity generation from the builder scenario.
+- `strategy_only`: strategy-catalog planning followed by opportunity generation.
+- `strategy_plus_evidence`: planning, complete analysis of the versioned evidence packet, and
+  opportunity generation.
+- `full_pipeline`: the evidence path followed by one critique-and-revision pass.
+
+`generate_evaluation_variants` is resumable, records private response IDs and token usage, disables
+API storage, and refuses to run without both `OPENAI_API_KEY` and `--confirm-cost`; the complete
+20-scenario run makes 200 provider calls. `prepare_evaluation_packet` then randomizes each scenario's
+output order behind opaque IDs and writes a blind packet, a separately held variant map, two rating
+templates, and an adjudication template. `analyze_evaluation` requires two distinct complete raters,
+requires exact adjudication for every score difference of at least two, retains original scores, and
+reports all seven dimensions plus deterministic 10,000-resample paired scenario-bootstrap intervals.
+
+The full workflow, artifact privacy boundaries, and commands are documented in
+[`evaluation/README.md`](evaluation/README.md). Generation and independent human rating have not been
+run in this repository state, so no benchmark result or PG-027 acceptance claim is made yet.
+
+## Current end-to-end workflow
+
+1. Create or open a canvas, then add one goal and the relevant global or branch-scoped builder constraints.
+2. Open generation controls, choose an execution profile, select the goal and constraints, and start `generate_strategies`.
+3. Keep the worker running while the browser reconstructs progress from the canvas SSE cursor. When the run reaches a pending patch, inspect its operations and apply all or a dependency-closed subset.
+4. Select one accepted strategy and run `research_evidence`. Provisional source-backed claims remain visibly separate from authoritative graph state until the evidence patch is reviewed and applied.
+5. Select the accepted strategy plus accepted, current claims and run `synthesize_opportunities`. The resulting patch contains three opportunities plus critique-derived assumptions, risks, contradictions, validation experiments, provenance, and separate quality dimensions.
+6. Apply the selected patch operations transactionally. The applied opportunity inspector preserves distribution and defensibility rationale alongside evidence strength, novelty, builder fit, feasibility, distribution clarity, and operational burden.
+7. Edit or remove an upstream premise, disconnect a dependency, reject accepted evidence, or replace an assumption. The audited mutation marks every reachable dependent stale according to the fixed edge-direction table.
+8. Explicitly regenerate one stale production unit or a composite branch. Applying the regeneration patch keeps the old stale branch and causes intact, creates fresh successors and `evolves_into` lineage, clones applicable branch constraints, and enables retained-branch comparison.
+
+Patch rejection, generation failure, cancellation, retry, lease loss, and SSE reconnect never promote provisional UI state into the authoritative graph. Only transactional graph operations and an accepted pending patch do that.
 
 ## Phase 2 generation APIs and SSE verification
 
 Generation remains operation-specific. Create a run with `POST /api/canvases/{canvas_id}/generation-runs`, inspect it with `GET /api/generation-runs/{run_id}`, and use the `/cancel` or `/retry` subresource for explicit lifecycle controls. Run creation accepts only `operation`, `selected_node_ids`, `expected_node_versions`, optional `instruction`, `execution_profile_id`, `idempotency_key`, and `regeneration_scope` only for `regenerate_stale`.
 
-The run endpoint locks the canvas before selected nodes and freezes one semantic context snapshot. An exact idempotency-key replay returns the existing run with `202`; conflicting reuse returns `409`. The browser progress UI is intentionally deferred, but the persisted SSE API is complete.
+The run endpoint locks the canvas before selected nodes and freezes one semantic context snapshot. An exact idempotency-key replay returns the existing run with `202`; conflicting reuse returns `409`. The browser consumes the persisted SSE API through one cursor-replayed stream per canvas and reconstructs active, failed, cancelled, retried, and patch-ready runs after reconnect.
 
 Start the ASGI server exactly as follows:
 
@@ -111,11 +202,55 @@ The canonical replay bundle is `fixtures/security-questionnaires/v1`. Matching i
 
 Live structured stages use the OpenAI Responses structured-output path with GPT-5.6. Research is bounded to the configured query/result limits across OpenAI hosted web search, GitHub public search, Stack Exchange search, and explicit user sources. Research events remain provisional until a candidate evidence patch is accepted, and synthesis accepts only explicitly selected applied, current claim nodes with their source provenance.
 
+## Phase 4 patch review and explicit regeneration
+
+Editing or deleting a semantic node or dependency edge traverses the explicit edge-direction table and writes operation-linked staleness causes. The first fresh-to-stale transition increments the semantic version once; additional causes remain append-only without another version bump. Rejecting accepted evidence is one audited transaction that recalculates source eligibility, preserves independently supported claims, rejects unsupported claims, excludes rejected material from future generation context, and invalidates every dependent descendant.
+
+Regeneration is always explicit and always parallel. Node scope regenerates one normalized strategy, claim/provenance, or opportunity-family production unit. Branch scope freezes a deduplicated, checkpointed strategy/evidence/opportunity workset and emits one final candidate patch. Applying that patch never edits or clears the old stale branch: each production root receives one fresh successor with `regenerated_from_node_id`, the frozen `regeneration_scope`, and `lineage_mode: parallel`; an audited `evolves_into` edge links old to new; and every applicable branch-scoped constraint is cloned onto its successor. Partial review treats each successor, lineage edge, and constraint-clone set as one atomic dependency group.
+
+The patch preview and applied opportunity inspector show evidence strength, novelty, builder fit, technical feasibility, distribution clarity, and operational burden separately, together with distribution and defensibility rationale. Failed, cancelled, lease-lost, or retried runs clear ephemeral loading state without mutating the authoritative graph; only a pending patch can replace the overlay with review UI.
+
+The same canvas-operation endpoint also owns the Phase 4 audited actions `REJECT_EVIDENCE` and `REPLACE_ASSUMPTION`. Rejected source and claim nodes remain readable, focusable, visibly badged, and inspectable after reload, but they are excluded from future context and generation selection. Assumption replacement records the previous value and invalidates its owning opportunity family without silently regenerating it.
+
+## Current API surface
+
+All mutating browser requests retain Django CSRF protection. In public mode, every resource endpoint below resolves the anonymous session before resource lookup; direct canvas creation/deletion and profiles outside hybrid/replay are disabled. The local API currently exposes:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/health` | Verify application/PostgreSQL readiness, report public-demo mode, and issue the CSRF cookie |
+| `GET` | `/api/demo/bootstrap` | Resume a valid anonymous demo or create a new isolated seeded session |
+| `POST` | `/api/demo/reset` | Fence active work and replace only the current session's canvas with a fresh seed |
+| `POST` | `/api/canvases` | Create a canvas |
+| `GET`, `PATCH`, `DELETE` | `/api/canvases/{canvas_id}` | Read, rename, or delete a canvas and its owned durable data |
+| `GET`, `POST` | `/api/canvases/{canvas_id}/operations` | Replay later revisions or apply one idempotent localized graph operation |
+| `POST` | `/api/canvases/{canvas_id}/generation-runs` | Create an operation-specific generation or regeneration run |
+| `GET` | `/api/generation-runs/{run_id}` | Inspect durable run state and its linked patch |
+| `POST` | `/api/generation-runs/{run_id}/cancel` or `/retry` | Cancel or explicitly retry a run |
+| `GET` | `/api/canvases/{canvas_id}/events?after={sequence}` | Replay and stream canvas-scoped SSE progress |
+| `GET` | `/api/graph-patches/{patch_id}` | Inspect a candidate patch, review metadata, dependencies, and decisions |
+| `POST` | `/api/graph-patches/{patch_id}/apply` | Apply all operations, a dependency-closed selection, or only nonconflicting operations |
+| `POST` | `/api/graph-patches/{patch_id}/reject` | Reject the complete pending patch without graph mutation |
+| `POST` | `/api/graph-patches/{patch_id}/regenerate` | Request one idempotently linked revised patch run with an instruction |
+| `POST` | `/api/canvases/{canvas_id}/sources` | Start bounded URL or user-text source ingestion |
+| `GET` | `/api/source-ingestions/{ingestion_id}` or `/api/sources/{source_id}` | Inspect ingestion state or retained derived source metadata |
+
+Graph patch apply accepts optional `selected_operation_ids` and `apply_nonconflicting_only`. Dependency closure is validated server-side; client selection cannot orphan a prerequisite, lineage edge, or cloned branch constraint. Patch rejection accepts no fields. Patch regeneration requires a nonblank `instruction` and `idempotency_key`.
+
 ## Retained source content
 
 Proofgraph follows the DQ-003 derived-evidence-only policy. It never persists complete retrieved pages, HTML, or user-supplied source documents. Durable records may contain citation metadata, content hashes, derived claims, and sanitized excerpts of at most 500 Unicode characters. Accepted graph evidence and run/stage/event audit records remain until canvas deletion; deleting a canvas permanently cascades through its graph, runs, stages, events, patches, decisions, reservations, and caches. Future query caches have a 24-hour physical-expiry requirement, retrieved-content rows keep `retained_content` null, and test fixture bundles must be synthetic or explicitly redistributable.
 
 ## Checks
+
+Latest verified Phase 5 repository gate, including the deterministic PG-027 harness, on July 15, 2026:
+
+- PostgreSQL migrations, migration-drift detection, and database readiness passed.
+- Ruff formatting and lint passed.
+- All **260 backend tests** passed.
+- Frontend formatting, lint, application/e2e type checking, all **29 unit/component tests**, and the production build passed.
+- All **3 live PostgreSQL-backed Playwright journeys** passed: the anonymous demo seed/reset/retired-canvas path, durable Phase 4 invalidation, and the Phase 1 graph journey.
+- Representative plans use the partial demo active-run index and ordered session-expiry index without sequential scans.
 
 Backend formatting and static analysis:
 
@@ -194,6 +329,50 @@ git diff --check
 
 The backend suite verifies strict schemas and OpenAI-compatible JSON schemas; deterministic graph neighborhoods and budgets; bounded source ingestion, caching, extraction, and clustering; exact evidence-selection gates; three-candidate synthesis and one critique pass; dependency-closed candidate patches with provenance; production profile fencing; timeout, malformed-output, rate-limit, and no-result behavior; strict fixture mismatch handling; and full replay for generation, research, synthesis, every target-localized stale-node plan, and a composite stale branch without live provider access.
 
+## Phase 4 verification
+
+Run the patch-review and regeneration gate after Phase 3:
+
+```powershell
+docker compose up -d db
+uv run python manage.py migrate
+uv run python manage.py makemigrations --check --dry-run
+uv run pytest
+uv run ruff format --check .
+uv run ruff check .
+
+Set-Location web
+npm run check
+npm run test:e2e
+Set-Location ..
+
+git diff --check
+```
+
+The Phase 4 coverage adds every dependency direction, cycles and converging paths, multiple active causes, pre-delete and changed-edge invalidation, evidence rejection with independent support, manual/ineligible regeneration rejection, target-local and composite checkpoint resume/cancellation, DQ-004 add-only lineage and constraint clones, atomic partial lineage selection, critique-to-preview-to-transactional-apply, patch conflict recovery, persistent quality inspection, replay-safe SSE progress, and retained-branch actions. PG-025 completes the phase exit with 248 passing backend tests, 26 passing frontend unit/component tests, a production build, and two live PostgreSQL-backed Playwright journeys, including durable visible invalidation across reload.
+
+## Phase 5 demo verification
+
+Run the anonymous-demo gate after Phase 4:
+
+```powershell
+docker compose up -d db
+uv run python manage.py migrate
+uv run python manage.py makemigrations --check --dry-run
+uv run pytest
+uv run ruff format --check .
+uv run ruff check .
+
+Set-Location web
+npm run check
+npm run test:e2e
+Set-Location ..
+
+git diff --check
+```
+
+The gate currently contains 267 backend tests, 29 frontend component tests, and three Playwright journeys. Phase 5 coverage verifies signed-cookie forgery rejection; exact seed isolation; unique active-canvas ownership; expired bootstrap rotation versus API denial; reset without expiry/quota evasion; reset and cleanup lease fencing; CSRF; cross-session and retired-resource denial; anonymous profile allowlisting; hybrid quotas and circuit breaker; demo query plans; cached-evidence labels; live-versus-replay explanation; bootstrap request coalescing; and the one-click judge journey. PG-027 coverage additionally validates all 20 synthetic scenarios, the frozen 1/2/3/4-stage variants, API-storage disabling, resumable generation, deterministic blinding, private-map separation, complete two-rater scoring, exact disagreement adjudication, paired bootstrap thresholds, and the offline management-command artifact workflow. Tests make no paid provider calls.
+
 ## Reversible browser setup
 
 The browser source toolchain is contained in `web/`. Its generated `node_modules`, `dist`, coverage, and Playwright result directories are ignored, and Django does not depend on generated browser assets during development. `npm ci` recreates the exact locked dependency tree. Playwright stores Chromium in its normal per-user browser cache; run `npx playwright uninstall chromium` from `web/` to remove that binary as well.
@@ -211,6 +390,7 @@ The browser source toolchain is contained in `web/`. Its generated `node_modules
 | `OPENAI_API_KEY` | Enables the live and hybrid Phase 3 execution profiles. Leave blank for replay-only use. |
 | `GITHUB_TOKEN` | Optional GitHub public-search token for higher API allowances. |
 | `STACK_EXCHANGE_KEY` | Optional Stack Exchange application key for higher API allowances. |
+| `DEMO_PUBLIC_MODE` | When true, require anonymous demo sessions and bootstrap the browser directly into its isolated canonical canvas. |
 
 ## Stop local services
 

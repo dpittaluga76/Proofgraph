@@ -143,7 +143,12 @@ def validate_explicit_selection(
         if len(selected_nodes) != 1:
             raise _selection_error("Stale regeneration requires exactly one node.")
         node = selected_nodes[0]
-        if node.kind not in GENERATED_KINDS or not node.stale or not _is_applied(node):
+        if (
+            node.kind not in GENERATED_KINDS
+            or not node.stale
+            or not _is_applied(node)
+            or _is_manually_authored(node)
+        ):
             raise _selection_error("Stale regeneration requires one applied stale generated node.")
         return
 
@@ -337,6 +342,7 @@ def _independent_support_count(
             for source in [node_by_id.get(edge.target_id)]
             if source is not None
             and source.kind == NodeKind.SOURCE
+            and _is_eligible_context(source)
             and isinstance(source.metadata.get("independence_key"), str)
         }
         if keys:

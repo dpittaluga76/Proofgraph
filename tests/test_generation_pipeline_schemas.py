@@ -881,7 +881,10 @@ def test_contextual_patch_enforces_operation_kinds_metadata_and_directed_lineage
     wrong_direction["operations"][1]["edge"].update(
         {"source_node_id": "strategy_one", "target_node_id": "goal_one"}
     )
-    with pytest.raises(ValueError, match="exactly match validated semantic lineage"):
+    with pytest.raises(
+        ValueError,
+        match=r"constraint clones must depend|exactly match validated semantic lineage",
+    ):
         validator.validate(
             "constructing_patch",
             StageResultEnvelope(
@@ -939,6 +942,184 @@ def test_contextual_patch_enforces_operation_kinds_metadata_and_directed_lineage
             StageResultEnvelope(
                 stage_name="constructing_patch",
                 output=wrong_metadata,
+                provider_identity="fixture:test",
+            ),
+            stage_input=stage_input,
+        )
+
+
+def test_regeneration_patch_requires_parallel_lineage_and_constraint_clone_closure() -> None:
+    validator = PipelineStageOutputValidator()
+    strategy = {
+        "id": "strategy_successor",
+        "target_node_id": "strategy_old",
+        "template_id": "automate_mandatory_work",
+        "title": "Regenerated strategy",
+        "approach": "Preserve reviewer control while automating mandatory work.",
+        "rationale": "The frozen evidence supports a bounded parallel successor.",
+        "required_signal_matches": ["The work repeats."],
+        "failure_condition_risks": ["Review burden may remain high."],
+    }
+    stage_input = {
+        "run_id": "run_regeneration",
+        "base_canvas_revision": 4,
+        "context_snapshot": {
+            "nodes": [
+                {
+                    "id": "constraint_old",
+                    "kind": "constraint",
+                    "title": "Keep reviewer approval",
+                    "body": "Never remove the accountable reviewer.",
+                    "metadata": {"context_scope": "branch", "pinned": True},
+                    "branch_root_node_id": "strategy_old",
+                    "version": 1,
+                },
+                {"id": "goal_one", "kind": "goal", "version": 1},
+                {"id": "strategy_old", "kind": "strategy", "version": 2},
+            ],
+            "edges": [
+                {
+                    "id": "edge_goal_old",
+                    "source_node_id": "goal_one",
+                    "target_node_id": "strategy_old",
+                    "kind": "evolves_into",
+                    "version": 1,
+                }
+            ],
+        },
+        "context_manifest": {
+            "request": {"operation": "regenerate_stale", "regeneration_scope": "node"},
+            "branch_constraint_anchors": {"constraint_old": "strategy_old"},
+        },
+        "target_workset": [
+            {
+                "node_id": "strategy_old",
+                "kind": "strategy",
+                "stale_node_ids": ["strategy_old"],
+                "member_node_ids": ["strategy_old"],
+            }
+        ],
+        "prior_stage_outputs": {
+            "strategy:planning": {
+                "output": {
+                    "operation": "regenerate_stale",
+                    "strategies": [strategy],
+                    "research_plans": [],
+                }
+            }
+        },
+    }
+    valid_output = {
+        "base_canvas_revision": 4,
+        "known_node_ids": ["constraint_old", "goal_one", "strategy_old"],
+        "known_edge_ids": ["edge_goal_old"],
+        "regeneration_target_ids": ["strategy_old"],
+        "permitted_stale_resolution_ids": ["strategy_old"],
+        "operations": [
+            {
+                "operation_id": "add_successor",
+                "op": "ADD_NODE",
+                "client_generated_id": "strategy_successor",
+                "node": {
+                    "kind": "strategy",
+                    "title": strategy["title"],
+                    "body": strategy["approach"],
+                    "metadata": {
+                        "generated_by_run_id": "run_regeneration",
+                        "provenance_node_ids": ["goal_one"],
+                        "approach": strategy["approach"],
+                        "rationale": strategy["rationale"],
+                        "strategy_template_id": strategy["template_id"],
+                        "regenerated_from_node_id": "strategy_old",
+                        "regeneration_scope": "node",
+                        "lineage_mode": "parallel",
+                    },
+                },
+            },
+            {
+                "operation_id": "goal_lineage",
+                "op": "ADD_EDGE",
+                "depends_on": ["add_successor"],
+                "client_generated_id": "edge_goal_successor",
+                "edge": {
+                    "source_node_id": "goal_one",
+                    "target_node_id": "strategy_successor",
+                    "kind": "evolves_into",
+                    "metadata": {"generated_by_run_id": "run_regeneration"},
+                },
+            },
+            {
+                "operation_id": "parallel_lineage",
+                "op": "ADD_EDGE",
+                "depends_on": ["add_successor"],
+                "client_generated_id": "edge_old_successor",
+                "edge": {
+                    "source_node_id": "strategy_old",
+                    "target_node_id": "strategy_successor",
+                    "kind": "evolves_into",
+                    "metadata": {"generated_by_run_id": "run_regeneration"},
+                },
+            },
+            {
+                "operation_id": "clone_constraint",
+                "op": "ADD_NODE",
+                "depends_on": ["add_successor", "parallel_lineage"],
+                "client_generated_id": "constraint_clone",
+                "node": {
+                    "kind": "constraint",
+                    "title": "Keep reviewer approval",
+                    "body": "Never remove the accountable reviewer.",
+                    "branch_root_node_id": "strategy_successor",
+                    "metadata": {
+                        "context_scope": "branch",
+                        "pinned": True,
+                        "generated_by_run_id": "run_regeneration",
+                        "provenance_node_ids": ["constraint_old"],
+                        "review_status": "provisional",
+                    },
+                },
+            },
+        ],
+    }
+
+    validator.validate(
+        "constructing_patch",
+        StageResultEnvelope(
+            stage_name="constructing_patch",
+            output=valid_output,
+            provider_identity="fixture:test",
+        ),
+        stage_input=stage_input,
+    )
+
+    wrong_lineage = copy.deepcopy(valid_output)
+    wrong_lineage["operations"][2]["edge"]["kind"] = "supports"
+    with pytest.raises(ValueError, match="exactly match validated semantic lineage"):
+        validator.validate(
+            "constructing_patch",
+            StageResultEnvelope(
+                stage_name="constructing_patch",
+                output=wrong_lineage,
+                provider_identity="fixture:test",
+            ),
+            stage_input=stage_input,
+        )
+
+    destructive = copy.deepcopy(valid_output)
+    destructive["operations"].append(
+        {
+            "operation_id": "delete_old",
+            "op": "DELETE_NODE",
+            "node_id": "strategy_old",
+            "expected_version": 2,
+        }
+    )
+    with pytest.raises(ValueError, match="only add fresh successor"):
+        validator.validate(
+            "constructing_patch",
+            StageResultEnvelope(
+                stage_name="constructing_patch",
+                output=destructive,
                 provider_identity="fixture:test",
             ),
             stage_input=stage_input,
