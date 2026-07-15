@@ -1,0 +1,54 @@
+{
+  "outputs": {
+    "canonical_critique": {
+      "critiques": [
+        {
+          "opportunity_id": "opportunity_answer_workspace",
+          "novelty": "Reviewer-controlled reuse is a narrower wedge than generic questionnaire automation.",
+          "feasibility": "The six-week MVP is feasible if ingestion and integrations remain bounded.",
+          "buyer_and_budget": "A security operations lead is identifiable, but budget ownership needs validation.",
+          "recurrence": "The synthetic evidence indicates repeated work across sales cycles.",
+          "distribution": "Focused security and SaaS operator communities provide a plausible initial channel.",
+          "operational_burden": "Review and freshness operations remain material and must be measured.",
+          "differentiation": "Provenance and explicit approval distinguish it from unconstrained answer generation.",
+          "builder_fit": "The bounded workflow matches a small technical team.",
+          "falsifying_evidence": "Low questionnaire volume or unwillingness to pay would falsify the opportunity.",
+          "material_contradiction_or_gap": "Trust requirements may favor incumbents or manual expert review.",
+          "recommendation": "advance"
+        },
+        {
+          "opportunity_id": "opportunity_concierge_service",
+          "novelty": "The concierge is primarily a validation method rather than a differentiated product.",
+          "feasibility": "It can launch quickly but bespoke review threatens repeatability.",
+          "buyer_and_budget": "Revenue operations may feel the delay, but direct service budget is unproven.",
+          "recurrence": "Questionnaires recur, while concierge demand may not.",
+          "distribution": "Referrals are plausible but difficult to scale.",
+          "operational_burden": "Manual delivery is high and could overwhelm a small team.",
+          "differentiation": "Fixed scope and reviewer controls provide only limited defensibility.",
+          "builder_fit": "It is easy to test but misaligned with a software-focused operating preference.",
+          "falsifying_evidence": "High exception rates or low paid conversion would reject the service model.",
+          "material_contradiction_or_gap": "There is no independent willingness-to-pay evidence for concierge delivery.",
+          "recommendation": "revise"
+        },
+        {
+          "opportunity_id": "opportunity_answer_api",
+          "novelty": "A focused source-of-truth API is distinct but could be copied by incumbents.",
+          "feasibility": "The read-only core is feasible, while integrations add uncertain scope.",
+          "buyer_and_budget": "A security engineering lead is identifiable, but standalone API budget is unclear.",
+          "recurrence": "Answer retrieval repeats, but API-specific demand is not established.",
+          "distribution": "Integration partners are a hypothesis rather than a proven channel.",
+          "operational_burden": "Compatibility and support obligations may grow with every integration.",
+          "differentiation": "Trusted answer identity could differentiate the product only after adoption.",
+          "builder_fit": "The prototype fits, but a broad integration platform does not fit the six-week constraint.",
+          "falsifying_evidence": "No partner or buyer commitment to one integration would falsify the wedge.",
+          "material_contradiction_or_gap": "There is no direct evidence for a standalone approved-answer API.",
+          "recommendation": "revise"
+        }
+      ]
+    },
+    "regenerate_opportunity": {
+      "$extends": "canonical_critique",
+      "take_critiques": 1
+    }
+  }
+}

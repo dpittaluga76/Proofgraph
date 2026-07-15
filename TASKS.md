@@ -4,16 +4,15 @@ This backlog is derived from `design.md`, which is the source of truth. Tasks ar
 
 ## Current Goal
 
-Deliver **Phase 1: Graph foundation** so a user can create, edit, lay out, save, and reload a typed opportunity canvas.
+Deliver **Phase 4: Patch review and dependency-aware regeneration** on top of the completed intelligence pipeline.
 
 Current phase exit criteria:
 
-- Canvas, node, and edge state is persisted in PostgreSQL.
-- Localized graph operations are idempotent, versioned, validated, and recorded.
-- The browser renders and edits the graph, including node movement and auto-layout.
-- Save/reload and optimistic-conflict behavior are covered by tests.
+- Candidate patches are previewable and selectively reviewable with dependency closure.
+- Accepted operations apply transactionally with optimistic conflict detection and complete audit decisions.
+- Graph mutations propagate staleness directionally and regeneration preserves explicit lineage.
 
-Next task: **PG-001**.
+Next task: **PG-021**.
 
 ## Pending
 
@@ -29,14 +28,6 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Done when:** The decision, rationale, accessibility behavior, and canvas acceptance criteria are recorded for PG-024.
 
-#### DQ-003 — Define retained-source-content lifecycle
-
-**Depends on:** None
-
-**Outcome:** Define what source content may be retained, for how long, and how deletion propagates across every persistence surface.
-
-**Done when:** The policy covers graph nodes, stage outputs, persisted event payloads, source-ingestion reservations, both normalized cache tables, fixture bundles, canvas deletion, user-visible disclosure, and verification requirements for PG-006, PG-009, PG-015, PG-016, and PG-019.
-
 #### DQ-004 — Choose replace-versus-parallel stale-branch regeneration
 
 **Depends on:** None
@@ -44,14 +35,6 @@ Decision tasks are listed before their dependents. Each completed decision must 
 **Outcome:** Define whether regenerated stale work replaces the old branch or creates a parallel branch.
 
 **Done when:** The decision records provenance, undo/audit, branch comparison, and patch behavior required by PG-023 and PG-024.
-
-#### DQ-005 — Decide explicit-neighborhood versus semantic-similarity context
-
-**Depends on:** None
-
-**Outcome:** Select the MVP context-neighborhood strategy without introducing an unrecorded default.
-
-**Done when:** The design records the algorithm, deterministic ranking implications, cost, fallback behavior, and tests required by PG-013 and PG-023.
 
 #### DQ-006 — Choose internal-only or product-UI evaluation harness
 
@@ -69,377 +52,7 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Done when:** Naming, repository/UI migration scope, and submission usage are recorded for PG-030.
 
-#### DQ-008 — Select the canonical demo opportunity
-
-**Depends on:** None
-
-**Outcome:** Select the scenario used by fixtures, the seeded canvas, evaluation examples, and the judge demonstration.
-
-**Done when:** The scenario inputs, expected evidence, opportunity shape, reset state, and fixture-bundle identifier are recorded for PG-019 and PG-026.
-
 ### Phase 1 — Graph foundation
-
-#### PG-001 — Bootstrap the application runtime
-
-**Depends on:** None
-
-**Outcome:** Establish the smallest runnable Django, PostgreSQL, browser-client, and test foundation without introducing infrastructure excluded by the design.
-
-**Done when:**
-
-- The Django ASGI web process starts locally and connects to PostgreSQL through environment-based configuration.
-- A separate worker entry point exists, even if generation work is not implemented yet.
-- The browser client has a documented, reversible build/development setup.
-- Setup includes baseline formatting, static analysis, and test commands.
-- No Redis, Celery, Neo4j, or WebSocket dependency is introduced.
-
-#### PG-002 — Implement the relational graph schema
-
-**Depends on:** PG-001
-
-**Outcome:** Persist canvases, typed nodes, typed edges, and append-only graph operations using the frozen domain taxonomy.
-
-**Done when:**
-
-- Migrations create `canvas`, `node`, `edge`, `graph_operation`, and `node_staleness_cause` records aligned with design sections 9 and 12.
-- Nodes and edges belong to one canvas; nodes carry independent semantic and position versions/timestamps, while edges carry an entity version.
-- Node semantic content is separated from position and UI-only state.
-- Constraint metadata validates `context_scope: global | branch` and `pinned: boolean`; branch scope requires one relational same-canvas `branch_root_node_id` of kind strategy, claim, or opportunity, while global scope requires a null root.
-- Nodes persist queryable stale state and an append-only, operation-linked cause ledger with database-enforced same-canvas references and valid active/cleared records.
-- Node and edge kinds are validated against the frozen MVP taxonomy.
-- Referential integrity prevents cross-canvas edges, branch anchors, staleness causes, and dangling endpoints.
-- Graph operations store an actor-scoped operation key and request fingerprint with a uniqueness constraint per canvas.
-- Migrations add the required node, edge, graph-operation, active-staleness, and branch-anchor access-path indexes from design section 12.14; representative query-plan checks avoid full scans.
-
-#### PG-003 — Implement canvas and localized graph-operation APIs
-
-**Depends on:** PG-002
-
-**Outcome:** Support canvas CRUD and localized graph mutations rather than whole-graph replacement.
-
-**Done when:**
-
-- Canvas endpoints implement the API surface in design section 27.1.
-- `POST /api/canvases/{canvas_id}/operations` supports `ADD_NODE`, `UPDATE_NODE`, `DELETE_NODE`, `ADD_EDGE`, `UPDATE_EDGE`, `DELETE_EDGE`, `PATCH_NODE_METADATA`, and `MOVE_NODE`.
-- Every direct mutation includes a client-generated operation key; exact retry returns the original result and conflicting key reuse returns `409`.
-- `GET /api/canvases/{canvas_id}/operations?after={revision}` returns every later operation in deterministic revision-and-operation order for incremental synchronization.
-- Semantic node mutations validate `expected_version`; `MOVE_NODE` validates `expected_position_version`; edge updates/deletes validate the edge version.
-- Semantic mutations increment only the semantic version, update `semantic_updated_at`, and invalidate token metadata; `MOVE_NODE` increments only the position version and updates only position/general timestamps, so layout changes cannot invalidate generation or graph-patch preconditions.
-- `UPDATE_NODE` and `PATCH_NODE_METADATA` enforce the same per-kind writable-field allowlists; attempts to smuggle or directly write server-owned review, support, stale, source-identity, provenance, or lineage fields are rejected without creating an operation.
-- `DELETE_NODE` returns `409` with incident edge IDs/versions and referencing branch-constraint IDs/versions until the client resolves those dependencies through audited operations; it never silently cascades.
-- Pinning/unpinning, changing a constraint's context scope, or reanchoring its branch root is an audited semantic mutation with an expected-version precondition and kind/same-canvas validation.
-- Each successful mutation locks the canvas before entity rows, appends a `graph_operation`, and increments the canvas revision in the same short transaction.
-- Canvas deletion removes every Phase 1 canvas-scoped record; later persistence migrations must extend the same lifecycle deletion test.
-- API tests cover validation, metadata ownership, wrong-kind fields, rollback, cross-canvas branch anchors, incremental operation replay, canvas-first locking, and optimistic conflicts.
-
-#### PG-004 — Build the editable graph canvas
-
-**Depends on:** PG-003
-
-**Outcome:** Let a user create and manipulate the typed graph through a browser canvas.
-
-**Done when:**
-
-- A user can create/open a canvas and add goal and constraint nodes.
-- Typed nodes and edges render distinctly without supporting arbitrary ontology editing.
-- A user can select nodes, edit semantic content, add/remove edges, delete entities, and move nodes.
-- Deleting a node with incident edges or anchored branch constraints presents the conflict, guides the user through explicit dependency resolution, and retries without hiding any removal from history.
-- A user can mark a constraint as pinned global or branch-scoped, choose a valid branch root, reanchor it, and see that semantic state survive reload.
-- Node movement is persisted through idempotent localized `MOVE_NODE` operations using position-version preconditions.
-- An auto-layout action produces readable deterministic placement without changing semantic graph state.
-
-#### PG-005 — Complete Phase 1 persistence and graph-foundation verification
-
-**Depends on:** PG-003, PG-004
-
-**Outcome:** Prove the graph foundation survives real editing and reload flows.
-
-**Done when:**
-
-- Save/reload preserves graph content, metadata, positions, entity versions, and canvas revision.
-- Concurrent stale edits produce a recoverable UI conflict instead of overwriting newer state.
-- Tests cover node/edge CRUD, incident-edge and branch-anchor node-delete rejection/retry, operation idempotency and conflicting-key reuse, metadata field ownership, semantic/position version and timestamp isolation, global/branch constraint anchoring and pinning, operation ordering, revision increments, index-backed graph access, auto-layout persistence, and reload.
-- The canonical goal-plus-builder-constraints setup works end to end.
-- Phase 1 setup and verification commands are documented.
-
-### Phase 2 — Durable jobs and progress
-
-#### PG-006 — Add generation persistence and run APIs
-
-**Depends on:** PG-005, DQ-003
-
-**Outcome:** Persist generation state and expose an idempotent, version-checked entry point for operation-specific runs.
-
-**Done when:**
-
-- Migrations implement `generation_run`, `generation_stage`, `canvas_event_cursor`, `generation_event`, `graph_patch`, and `graph_patch_operation_decision` from design section 12.
-- Composite database constraints prove that every event and patch belongs to the same canvas as its run and that every patch decision can link only a graph operation from that patch's canvas; cross-canvas fixtures fail at the database boundary.
-- The durable layer defines stable `RunContextFactory`, `ExecutionProfileResolver`, and `StageOutputValidator` ports plus a generic validated stage-result envelope.
-- Deterministic test-only adapters exercise the Phase 2 system; they are unavailable to product requests and cannot silently substitute for an approved profile.
-- `POST /api/canvases/{canvas_id}/generation-runs` resolves session ownership and injected ports, locks the canvas before selected entities, validates the exact operation-specific kind/cardinality/review-state contract from design section 14.1, and captures one immutable semantic before-or-after state before creating the queued run and returning `202`, `run_id`, and `events_url`.
-- The supported operations are `generate_strategies`, `research_evidence`, `synthesize_opportunities`, and `regenerate_stale`; node scope resolves one target-localized production plan, while branch scope freezes the cycle-safe composite strategy/evidence/opportunity workset and unsupported combinations return `422`.
-- Idempotency keys are unique per canvas: an identical request returns the existing run and a conflicting reuse returns `409`.
-- `GET /api/generation-runs/{run_id}` returns status, current stage, attempts, structured terminal error, and ready patch ID when present.
-- Run context snapshots, manifests, semantic hashes, selected node versions, branch target IDs/versions/distances/anchors, retry fields, request fingerprints, and immutable execution configuration are stored.
-- Unique constraints protect stage keys, canvas event sequences, run event sequences, and per-operation patch decisions.
-- Generation-run migrations include the queue claim/reclaim indexes required by design section 12.14; the later demo-session migration adds its active-session index when that foreign key exists.
-- The cursor migration backfills every existing canvas, and the canvas-creation path atomically creates a cursor row for every future canvas.
-- The DQ-003 deletion path is extended and integration-tested across runs, stages, cursor/events, patches/decisions, and every later canvas-scoped persistence table.
-- Run creation emits the shared structured-log context and applicable run/canvas/session/operation identifiers required for later run, stage, worker, and provider instrumentation.
-- Tests cover allowed state transitions and terminal states, exact before-or-after context capture during a concurrent graph mutation, branch workset cycle/convergence deduplication, and rejection of mixed-revision snapshots.
-
-#### PG-007 — Implement queue claiming and fenced worker leases
-
-**Depends on:** PG-006
-
-**Outcome:** Claim work safely through PostgreSQL `SKIP LOCKED` with stale-worker fencing.
-
-**Done when:**
-
-- The worker claims one eligible run using `SELECT ... FOR UPDATE SKIP LOCKED` in a short transaction.
-- Claim and expired-lease reclaim queries use the partial indexes from design section 12.14, with representative `EXPLAIN` assertions at production-like cardinality.
-- Every claim atomically increments `attempt` and `lease_epoch` and assigns `worker_id` plus a fresh lease token.
-- Every worker checkpoint/finalization write verifies run ID, running status, lease token, and lease epoch.
-- A lease-keeper renews heartbeats on its own database connection every 10–15 seconds.
-- The default lease is 60 seconds, heartbeat and expiry use PostgreSQL time, and renewal extends only the current token/epoch lease.
-- Queue-depth, claim-attempt, heartbeat-failure, and lease-loss telemetry is emitted with run/canvas/worker identifiers.
-- Expired or queued rows at `max_attempts` are terminalized with a poison-job error and one `run.failed` event instead of remaining claimable or stuck in `running`.
-- Concurrent-worker tests cover first-claim/reclaim attempt increments, exhausted-crash terminalization, delayed-but-valid heartbeat, expiry/reclaim, late fenced renewal, and prove a stale worker cannot checkpoint or finalize after reassignment.
-
-#### PG-008 — Implement stage checkpoints, retry, and resume
-
-**Depends on:** PG-007
-
-**Outcome:** Resume failed runs from the first incomplete stage without repeating valid completed work.
-
-**Done when:**
-
-- Stage input hashes include semantic input, stage version, provider identity, profile, and fixture version supplied through the injected durable-layer ports.
-- The worker executes only the stages configured for the run operation; deterministic clustering is checkpointed with its versioned application-stage identity.
-- Completed stage outputs are immutable, pass the generic Phase 2 envelope and the injected stage-specific validator, and are reusable only on an exact key match.
-- The worker executes external calls outside database transactions using the two-transaction stage protocol.
-- Retry provides at-least-once execution while graph state remains isolated behind unapplied patches.
-- Integration tests prove completed stages are reused and invalidated stages are rerun.
-- Stage duration, attempt, failure/retry, model-response-ID, and token-usage hooks emit structured telemetry even when a test adapter supplies the values.
-
-#### PG-009 — Implement persisted canvas-scoped SSE progress
-
-**Depends on:** PG-006
-
-**Outcome:** Stream and replay generation progress through one SSE connection per canvas.
-
-**Done when:**
-
-- `GET /api/canvases/{canvas_id}/events?after={canvas_sequence}` replays committed events in ascending canvas-sequence order and then waits for new ones.
-- Appending an event allocates its monotonic canvas sequence through `canvas_event_cursor` and inserts the event in the same short transaction.
-- All design section 17 event types include both canvas and run sequences.
-- Research-source and extracted-evidence events carry `provisional: true`, and progress handling never treats them as authoritative graph mutations.
-- Persisted payloads follow DQ-003 retention/redaction rules, including replay and canvas deletion.
-- Heartbeat comments keep idle streams alive, and disconnect/reconnect does not lose progress.
-- Compression/buffering middleware does not materialize `text/event-stream` responses.
-- Integration tests interleave at least two concurrent runs on one canvas and prove replay skips or duplicates no committed event.
-- The setup guide records the ASGI command, proxy settings if used, and an incremental `curl -N` verification.
-
-#### PG-010 — Add cancellation, terminal failures, and bounded worker recycling
-
-**Depends on:** PG-007, PG-008, PG-009
-
-**Outcome:** Make long-running work recoverable and prevent poison jobs or worker growth from degrading the system.
-
-**Done when:**
-
-- `POST /api/generation-runs/{run_id}/cancel` locks the run: queued runs become cancelled immediately, running runs receive a cancellation request finalized only by the fenced worker, duplicate cancelled requests return the existing result, and completed/non-cancellable states return `409`.
-- `POST /api/generation-runs/{run_id}/retry` requeues only a failed run with a retryable error, no active lease, and remaining attempts; it preserves immutable inputs/checkpoints, emits `run.retry_requested`, and returns `409` for cancelled, non-retryable, lease-owned, or exhausted runs.
-- Runs fail terminally after the configured maximum attempts with a structured error and `run.failed` event.
-- Failures preserve completed checkpoints and never leave permanent loading state.
-- Workers exit gracefully after 50 jobs or 14,400 seconds and release connections, lease threads, queries, caches, and large payloads between jobs.
-- Attempt, cancellation, exhausted-job, retry, and recycling telemetry is emitted by this component.
-- Tests cover concurrent cancel-versus-claim/finalize, at-most-one `run.cancelled` event, explicit safe retry, exhausted retry rejection, poison jobs, lease loss, worker crash recovery, and clean recycling.
-
-#### PG-011 — Verify the durable-job architecture end to end
-
-**Depends on:** PG-008, PG-009, PG-010
-
-**Outcome:** Demonstrate reliable job execution under concurrency and interruption before adding live intelligence.
-
-**Done when:**
-
-- A deterministic test-double job progresses from queued to completed and emits replayable stage events without depending on the Phase 3 fixture-bundle system.
-- The Phase 2 test profile is proven unreachable from product requests.
-- Reclaim after lease expiry cannot produce duplicate finalization.
-- SSE reconnect resumes after the supplied canvas sequence, including when concurrent runs interleave events.
-- A failed job resumes at its first incomplete stage.
-- No test or trace shows an external call, retry sleep, or streaming loop inside a database transaction.
-
-### Phase 3 — Intelligence pipeline
-
-#### PG-012 — Define strict pipeline domain schemas and strategy templates
-
-**Depends on:** PG-011
-
-**Outcome:** Establish validated contracts for planning, research, sources, claims, opportunities, critiques, and graph patches.
-
-**Done when:**
-
-- The initial 14 opportunity strategies and their required signals/failure conditions are versioned data.
-- Strict schemas distinguish operation plan, research questions, query plan, required evidence types, source, observed/derived/inferred/contradicting claim, evidence cluster, opportunity, assumption, risk, validation experiment, and graph patch, and supply production `StageOutputValidator` implementations for those outputs.
-- Claim schemas require normalized, sorted `topic_keys` and `mechanism_tags` plus a nullable normalized `contradiction_target_key`; source schemas require a stable `independence_key`. Invalid or noncanonical values and claim/source relation mismatches are rejected.
-- Opportunity output requires buyer, problem, spend/workaround, mechanism, business model, why now, evidence, contradiction, assumptions, risks, experiment, builder fit, distribution channel/rationale, defensibility rationale, technical feasibility, and operational burden.
-- Evidence strength, novelty, builder fit, technical feasibility, distribution clarity, and operational burden remain separately validated dimensions rather than one score; a channel-less distribution score or rationale-free defensibility value is invalid.
-- The supported/speculative threshold is enforced against the structured fields and accepted evidence rather than dimension ratings alone.
-- Invalid or incomplete structured model output fails explicitly.
-
-#### PG-013 — Build deterministic operation-specific context selection
-
-**Depends on:** PG-012, DQ-005
-
-**Outcome:** Construct token-budgeted context from the relevant graph neighborhood, not the full canvas.
-
-**Done when:**
-
-- Context includes mandatory selected nodes, pinned global constraints, and pinned branch constraints only when at least one mandatory generated selection exists and their relational anchor contains every such selection, plus operation, user instruction, IDs, and versions.
-- A production `RunContextFactory` implements the durable Phase 2 port without changing its stored run envelope.
-- Provenance, evidence, descendants, and optional neighbors follow the frozen tier budgets and deterministic ranking rules.
-- Traversal follows the design's per-edge dependency direction table, uses a visited set, and is cycle-safe.
-- A bounded contradiction reserve is applied before supporting evidence is packed.
-- The model response budget and fixed system/JSON/edge/excerpt reserve are removed before tier percentages are applied; fully serialized requests never exceed the hard model input limit, and mandatory overflow returns `422 context_too_large` before queueing.
-- Canonical semantic token counts are precomputed and invalidated when semantic content changes.
-- Context recency uses `semantic_updated_at`; position timestamps/versions never participate in semantic ranking, token representation, manifests, or hashes.
-- Every run persists included and excluded entity IDs in a context manifest.
-- Unit tests prove deterministic packing, stable tie-breaking, branch-anchor inclusion/exclusion, identical context after layout-only moves, correct forward/inverse edge traversal, termination on cycles, hard-cap enforcement, mandatory overflow, and exclusion of coordinates, styling, UI state, full pages when claims exist, and unrelated branches.
-
-#### PG-014 — Implement provider ports and execution profiles
-
-**Depends on:** PG-012
-
-**Outcome:** Keep orchestration independent of live, hybrid-demo, or replay provider implementations.
-
-**Done when:**
-
-- Typed ports exist for planning, research, extraction, synthesis, critique, and patch construction.
-- Deterministic clustering is a versioned application-layer stage shared by all profiles rather than a provider port.
-- A production `ExecutionProfileResolver` implements the durable Phase 2 port and resolves only registered product profiles.
-- `live_v1` uses live planning, research, extraction, synthesis, critique, and patch construction; `demo_hybrid_v1` uses fixtures for planning/research/extraction and live synthesis/critique/patch construction; `replay_v1` uses fixtures for all six provider-backed stages.
-- Product requests reject unregistered and test-only profiles.
-- Domain orchestration contains no `is_demo_mode` branching.
-- Each run stores immutable profile, fixture, pipeline, prompt, and strategy versions.
-- Provider identity participates in stage input hashing.
-
-#### PG-015 — Implement secure research adapters
-
-**Depends on:** PG-014, DQ-003
-
-**Outcome:** Gather bounded evidence from OpenAI hosted web search, GitHub, Stack Exchange, and user-supplied inputs.
-
-**Done when:**
-
-- Research respects the default budget of five queries and ten retained sources.
-- Adapter telemetry records provider/source identity, latency, rate-limit outcomes, retained counts, OpenAI token usage where available, and source-ingestion reservation, in-flight reuse, completion/failure, expiry/reclaim, and fence-loss outcomes with ingestion/run/canvas identifiers.
-- Source results retain URL, title, retrieval time, content hash, source kind, authority metadata, and canonical source-level `independence_key`.
-- GitHub and Stack Exchange rate limits produce structured retryable failures.
-- User-supplied URLs allow HTTPS only, reject private/loopback/link-local/metadata destinations, re-check at most five redirects, enforce three-second connect/fifteen-second total timeouts, accept at most 2 MiB of decompressed HTML/plain text, and reject other content types; user text is at most 100 KiB UTF-8.
-- Migrations create the canvas-scoped `source_ingestion_request` reservation with operation key, request fingerprint, fenced lease, validated `running | completed | failed` lifecycle, result, and error fields from design section 12.12.
-- The reservation migration includes the partial reclaim index from design section 12.14 and a representative query-plan assertion.
-- `POST /api/canvases/{canvas_id}/sources` requires a canvas-scoped operation key, accepts either a protected HTTPS URL or bounded user-supplied text, and reserves the key before external work; exact completed retries return the original source, conflicts return `409`, and identical in-flight retries return `202` with the ingestion ID.
-- `GET /api/source-ingestions/{ingestion_id}` returns permitted status/error/result data for the same canvas/session, and stale reservations can be reclaimed only after their bounded lease expires.
-- Any URL retrieval occurs outside a database transaction; only the validated normalized result is persisted in a short transaction with its graph operation.
-- `GET /api/sources/{source_id}` returns source metadata and permitted retained content without exposing credentials or unsanitized excerpts.
-- Retrieved pages and user-supplied text remain isolated from system instructions, cannot trigger command execution, and pass adversarial prompt-injection tests.
-- Source retention policy decision **DQ-003** is resolved and implemented.
-- Tests cover single-flight concurrency, crash/reclaim fencing, exact retry, conflicting-key reuse, redirect/DNS rebinding attempts, decompression bombs, content types, and every hard input bound.
-
-#### PG-016 — Implement claim extraction, evidence clustering, and source caching
-
-**Depends on:** PG-015
-
-**Outcome:** Convert researched sources into deduplicated, source-backed claims and deterministic clusters with reusable PostgreSQL-backed caching.
-
-**Done when:**
-
-- One source can back multiple claims and one claim can reference multiple independent sources.
-- Claims record classification, evidence type, strength, limitations, and source IDs.
-- Claims record canonical `topic_keys`, `mechanism_tags`, `contradiction_target_key`, and source IDs; sources record canonical `independence_key` values used by deterministic retention and support counting.
-- Duplicate, irrelevant, unsupported, and contradicting evidence are handled explicitly.
-- At most twelve claims are retained using the source hierarchy, source authority, independent-source count, strength, recency, and stable-ID tie-breaking.
-- A deterministic `clustering` checkpoint groups claims by the exact tuple of evidence type, sorted topic keys, sorted mechanism tags, and normalized contradiction target without losing source provenance; independent support counts distinct accepted source `independence_key` values.
-- Migrations create separate canvas-scoped `research_query_cache` and `source_content_cache` tables, their exact-key/freshness indexes, and DQ-003 deletion/redaction behavior from design section 12.11.
-- Query-cache lookup uses only known pre-request fields; source-content lookup uses normalized URL plus freshness before retrieval and persists content hash as immutable identity afterward. Repeat-hit, expiry, changed-hash, changed-key, and deletion tests prove reuse and invalidation behavior.
-- Cached results retain original retrieval metadata and a cache-hit marker so they cannot be presented as newly retrieved.
-- Telemetry records extraction/retention counts, cluster counts, independent-source counts, cache hits/misses, and invalidation reasons.
-- Each schema-valid extraction batch emits progressive provisional evidence; no source or claim becomes authoritative or selectable until its research patch is accepted.
-- Rendered excerpts are sanitized before they reach the browser.
-- Rejected sources and claims follow design section 8.2.1 and are excluded from context, quality thresholds, synthesis, and critique.
-- Tests prove clustering is stable under input reordering, contradiction targets split clusters correctly, multiple independent source keys count separately, and syndicated copies sharing a source `independence_key` count only once.
-
-#### PG-017 — Implement opportunity synthesis and critique
-
-**Depends on:** PG-013, PG-014, PG-016
-
-**Outcome:** Produce three specific, evidence-aware opportunities and challenge them before presentation.
-
-**Done when:**
-
-- Synthesis generates exactly three structured candidates from the selected strategy, constraints, and retained evidence.
-- Every candidate carries explicit distribution channel/rationale, defensibility rationale, technical feasibility, and operational burden fields.
-- Critique evaluates novelty, feasibility, buyer/budget, recurrence, distribution, operational burden, differentiation, builder fit, and falsifying evidence.
-- Each candidate exposes evidence strength, novelty, builder fit, technical feasibility, distribution clarity, and operational burden separately rather than one synthetic score.
-- `supported` is assigned only when every design section 7.3 threshold is met; otherwise the candidate is `speculative`.
-- Every candidate includes material contradicting evidence or an explicit evidence gap.
-- Synthesis and critique enforce the intellectual-property boundaries in design section 21.3 and reject recommendations to copy protected code/assets, impersonate trademarks, reuse private datasets, or violate third-party terms.
-- The default budget permits one critique pass; retry reuses checkpoints rather than silently adding extra critique calls.
-
-#### PG-018 — Construct candidate graph patches without direct graph writes
-
-**Depends on:** PG-017
-
-**Outcome:** Convert validated pipeline output into typed, reviewable graph operations.
-
-**Done when:**
-
-- Patch construction emits only supported localized operation types and records `base_canvas_revision`.
-- Semantic update/delete operations include `expected_version`; `MOVE_NODE` includes `expected_position_version`; edge updates/deletes include the edge `expected_version`.
-- Every newly proposed entity has a patch-local `client_generated_id`; IDs are unique within the patch and references may use only known server IDs or those local IDs.
-- The patch records an operation dependency graph, and schema validation rejects cycles, unresolved references, and subsets whose required prerequisites are absent.
-- A candidate `DELETE_NODE` includes accepted prerequisite operations for every incident edge and branch-root constraint reference known at construction time; otherwise validation rejects the patch.
-- Regeneration patches declare their frozen target production units and the exact stale node IDs they may resolve; schema validation rejects targets outside the originating run workset.
-- New nodes and edges preserve traceable provenance from sources and claims through opportunities, risks, assumptions, and experiments.
-- Pipeline completion stores a candidate `GraphPatch`; it never mutates authoritative graph state.
-- Patch schema validation rejects missing endpoints, invalid kinds, and malformed metadata.
-- The default budget permits one patch-construction pass; retry reuses a matching completed checkpoint.
-
-#### PG-019 — Create strict versioned fixture bundles
-
-**Depends on:** PG-014, PG-016, PG-017, PG-018, DQ-003, DQ-008
-
-**Outcome:** Support deterministic hybrid and replay flows through immutable scenario bundles.
-
-**Done when:**
-
-- A canonical fixture directory contains a manifest, sources, claims, planning outputs, synthesis outputs, critique outputs, patch-construction outputs, and progress-event payloads.
-- Fixture payloads pass through the same validation as live provider outputs.
-- Matching includes scenario, stage, pipeline version, provider identity, semantic input hash, and fixture version.
-- A mismatch fails with a recoverable fixture-input error and never silently falls back to live APIs.
-- Fixture providers emit the same persisted domain events as live providers.
-- Manifest cases cover planning, research, extraction, synthesis, critique, and patch construction for every node plan and composite branch-phase combination; full replay reaches one `patch.ready` without any live provider call.
-- Fixture content and deletion behavior implement the retained-content policy selected in **DQ-003**.
-
-#### PG-020 — Integrate and verify the intelligence pipeline
-
-**Depends on:** PG-013, PG-018, PG-019
-
-**Outcome:** Complete the canonical strategy, research, evidence-selection, and synthesis workflow through separate operation-specific runs in every approved profile.
-
-**Done when:**
-
-- A user can generate three materially different strategies from a goal and builder constraints.
-- A `research_evidence` run produces the selected strategy, research questions, query plan, required evidence types, progressively inspectable provisional evidence, deterministic clusters, and a reviewable evidence patch.
-- The user must accept the evidence patch and explicitly select applied, non-stale, non-rejected claim nodes before starting `synthesize_opportunities`; selected claim IDs/expected versions are captured and their accepted source provenance is included automatically.
-- Operation tests cover every allowed and rejected node-kind/cardinality/review-state combination, global and anchored branch constraints, claim-only synthesis selection with automatic source provenance, every target-localized stale-node plan, and composite branch worksets containing strategy, evidence, and opportunity-family targets.
-- The synthesis run produces exactly three structured opportunities and never consumes provisional, rejected, unselected, or stale evidence.
-- Every opportunity traces to supporting and contradicting claims.
-- Live, hybrid-demo, and replay profiles use the same orchestrator and event contract.
-- The production composition root registers `RunContextFactory`, `ExecutionProfileResolver`, and `StageOutputValidator`; only then are `live_v1`, `demo_hybrid_v1`, and `replay_v1` enabled for product requests, while the deterministic Phase 2 test profile remains unreachable.
-- Tests cover every operation stage plan, the evidence-selection gate, timeouts, invalid structured output, rate limits, no-results, and unsupported-opportunity paths with user-readable errors.
 
 ### Phase 4 — Patch review and dependency-aware regeneration
 
@@ -641,9 +254,405 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 ## In Progress
 
-None.
+No active task. The next planned task is PG-021.
 
 ## Done
+
+### Phase 3 final handoff remediation — PG-016 through PG-020
+
+**Completed:** July 15, 2026
+
+**Outcome:** Closed the remaining Phase 3 trust-boundary gaps before Phase 4: deterministic prohibited-intent handling without guardrail false positives, subject-bound first-party authority classification, database-enforced immutability for candidate patch inputs, legacy regeneration-contract backfill, and a durable reviewed Git baseline.
+
+**Verification:** Adversarial policy tests cover behavioral reconstruction, confidential/private data, third-party terms, negated guardrails, monitoring, and descriptive compliance risks. Authority tests cover brandless vendor surfaces, generic analyst commentary, misleading subdomains, public publisher brands, GitHub discussions, and public-suffix identity. Migration `generation.0006_protect_graph_patch_contract` backfills compatible regeneration declarations, safely rejects incompatible pending patches, and installs PostgreSQL JSON-shape constraints plus an immutable-candidate trigger while preserving Phase 4 lifecycle updates. The complete backend suite passes (207 tests); Ruff formatting and lint, migration drift, and database readiness checks pass; the frontend formatting/lint/typecheck/unit/build gate passes (14 unit tests); the live PostgreSQL-backed Playwright journey passes; and the reviewed repository scope excludes credentials and generated output.
+
+### Phase 3 second-review remediation — PG-013, PG-016 through PG-020
+
+**Completed:** July 15, 2026
+
+**Outcome:** Closed the ordered Phase 3 review findings: reusable source-content caching, exact research/strategy and patch-lineage binding, clause-aware intellectual-property safeguards, opportunity-family replay fidelity, persisted mode-neutral regeneration targets and permitted stale resolutions, audit-complete extraction, immutable fixture identity, PostgreSQL-time ingestion leases, publisher-aware source-authority and independence classification, versioned mechanism tags, and cache-invalidation telemetry.
+
+**Verification:** Adversarial policy tests cover prohibited paraphrases, explicit guardrails, and descriptive risks. Publisher/subdomain, public-suffix, authority, mirror-normalization, and durable regeneration-contract tests pass. Migration `generation.0005_graphpatch_regeneration_contract` applies to PostgreSQL with no model drift. The complete backend suite passes (197 tests), including replay, concurrency, cache/index-plan, and persistence coverage; Ruff formatting and lint pass; the frontend formatting/lint/typecheck/unit/build gate passes (14 unit tests); the live PostgreSQL-backed Playwright journey passes; and `git diff --check` reports no whitespace errors.
+
+### Phase 3 review hardening — PG-013, PG-016 through PG-020
+
+**Completed:** July 15, 2026
+
+**Outcome:** Closed all ten architecture-review findings without changing the Phase 3 boundary. Candidate patches are now exact materializations of validated checkpoints; graph lineage uses the canonical dependency directions; branch synthesis can consume prior extraction batches; the research budget is enforced across the complete run; support and independent-source counts derive from authoritative claim-source relations; progress is durably emitted while a stage is still running; expired caches are physically deleted by the worker; replay identity is strictly versioned; and intellectual-property policy enforcement catches prohibited semantic copying rather than only exact phrases.
+
+**Verification:** Added focused regressions for patch cardinality and checkpoint binding, lineage direction, composite-branch data flow, global research budgets, signal spoofing, independent-source ranking, strict fixture identity, incremental durable events, worker cache cleanup, and paraphrased proprietary-copying requests. The complete backend suite (176 tests), frontend formatting/lint/typecheck/unit/build gate, PostgreSQL checks, migration drift check, full Ruff gate, Playwright journey, and `git diff --check` pass.
+
+### Phase 3 — Intelligence pipeline
+
+#### PG-020 — Integrate and verify the intelligence pipeline
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-013, PG-018, PG-019
+
+**Outcome:** Integrated strict production context, profile resolution, and contextual stage validation through the Phase 2 durable ports. Live, hybrid, and replay profiles now share one orchestrator/event contract; complete replay covers generation, research, synthesis, every stale production-unit kind, and composite stale branches without live provider access. Review hardening binds synthesis evidence to selected claim-source relations, normalizes opportunity-family worksets, enforces operation-local patch lineage/metadata, validates the complete outbound request budget, and correlates provider telemetry with its run and lease.
+
+**Phase boundary:** Phase 3 produces immutable candidate evidence patches but does not apply them. Patch review and authoritative application are delivered by PG-022 and PG-023 in Phase 4; Phase 3 synthesis accepts only evidence that is already authoritative in the frozen graph (for example, seeded fixtures or a patch applied by that later workflow).
+
+**Done when:**
+
+- A user can generate three materially different strategies from a goal and builder constraints.
+- A `research_evidence` run produces the selected strategy, research questions, query plan, required evidence types, progressively inspectable provisional evidence, deterministic clusters, and a reviewable evidence patch.
+- `synthesize_opportunities` requires an explicitly selected applied strategy and applied, non-stale, non-rejected claims; selected IDs/expected versions are captured and their accepted source provenance is included automatically. Applying the preceding evidence patch is explicitly a Phase 4 responsibility.
+- Operation tests cover every allowed and rejected node-kind/cardinality/review-state combination, global and anchored branch constraints, claim-only synthesis selection with automatic source provenance, every target-localized stale-node plan, and composite branch worksets containing strategy, evidence, and opportunity-family targets.
+- The synthesis run produces exactly three structured opportunities and never consumes provisional, rejected, unselected, or stale evidence.
+- Every opportunity traces to supporting and contradicting claims.
+- Live, hybrid-demo, and replay profiles use the same orchestrator and event contract.
+- The production composition root registers `RunContextFactory`, `ExecutionProfileResolver`, and `StageOutputValidator`; only then are `live_v1`, `demo_hybrid_v1`, and `replay_v1` enabled for product requests, while the deterministic Phase 2 test profile remains unreachable.
+- Tests cover every operation stage plan, the evidence-selection gate, timeouts, invalid structured output, rate limits, no-results, and unsupported-opportunity paths with user-readable errors.
+
+#### PG-019 — Create strict versioned fixture bundles
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-014, PG-016, PG-017, PG-018, DQ-003, DQ-008
+
+**Outcome:** Added the immutable `security_questionnaires_v1` bundle with exact normalized semantic-input matching, shared production validation, sanitized progress events, strict mismatch failure, hybrid fixture stages, and full provider-free replay across all operation and regeneration plans.
+
+**Done when:**
+
+- A canonical fixture directory contains a manifest, sources, claims, planning outputs, synthesis outputs, critique outputs, patch-construction outputs, and progress-event payloads.
+- Fixture payloads pass through the same validation as live provider outputs.
+- Matching includes scenario, stage, pipeline version, provider identity, semantic input hash, and fixture version.
+- A mismatch fails with a recoverable fixture-input error and never silently falls back to live APIs.
+- Fixture providers emit the same persisted domain events as live providers.
+- Manifest cases cover planning, research, extraction, synthesis, critique, and patch construction for every node plan and composite branch-phase combination; full replay reaches one `patch.ready` without any live provider call.
+- Fixture content and deletion behavior implement the retained-content policy selected in **DQ-003**.
+
+#### PG-018 — Construct candidate graph patches without direct graph writes
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-017
+
+**Outcome:** Added strict dependency-aware candidate-patch construction with versioned preconditions, local-ID resolution, delete prerequisites, regeneration workset fencing, provenance validation, and separate patch-ready/final completion transactions without authoritative graph mutation.
+
+**Done when:**
+
+- Patch construction emits only supported localized operation types and records `base_canvas_revision`.
+- Semantic update/delete operations include `expected_version`; `MOVE_NODE` includes `expected_position_version`; edge updates/deletes include the edge `expected_version`.
+- Every newly proposed entity has a patch-local `client_generated_id`; IDs are unique within the patch and references may use only known server IDs or those local IDs.
+- The patch records an operation dependency graph, and schema validation rejects cycles, unresolved references, and subsets whose required prerequisites are absent.
+- A candidate `DELETE_NODE` includes accepted prerequisite operations for every incident edge and branch-root constraint reference known at construction time; otherwise validation rejects the patch.
+- Regeneration patches declare their frozen target production units and the exact stale node IDs they may resolve; schema validation rejects targets outside the originating run workset.
+- New nodes and edges preserve traceable provenance from sources and claims through opportunities, risks, assumptions, and experiments.
+- Pipeline completion stores a candidate `GraphPatch`; it never mutates authoritative graph state.
+- Patch schema validation rejects missing endpoints, invalid kinds, and malformed metadata.
+- The default budget permits one patch-construction pass; retry reuses a matching completed checkpoint.
+
+#### PG-017 — Implement opportunity synthesis and critique
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-013, PG-014, PG-016
+
+**Outcome:** Added exact three-candidate synthesis with separate decision dimensions, structured support thresholds, contradiction/gap requirements, one checkpointed critique pass per candidate, and intellectual-property/third-party-terms enforcement.
+
+**Done when:**
+
+- Synthesis generates exactly three structured candidates from the selected strategy, constraints, and retained evidence.
+- Every candidate carries explicit distribution channel/rationale, defensibility rationale, technical feasibility, and operational burden fields.
+- Critique evaluates novelty, feasibility, buyer/budget, recurrence, distribution, operational burden, differentiation, builder fit, and falsifying evidence.
+- Each candidate exposes evidence strength, novelty, builder fit, technical feasibility, distribution clarity, and operational burden separately rather than one synthetic score.
+- `supported` is assigned only when every design section 7.3 threshold is met; otherwise the candidate is `speculative`.
+- Every candidate includes material contradicting evidence or an explicit evidence gap.
+- Synthesis and critique enforce the intellectual-property boundaries in design section 21.3 and reject recommendations to copy protected code/assets, impersonate trademarks, reuse private datasets, or violate third-party terms.
+- The default budget permits one critique pass; retry reuses checkpoints rather than silently adding extra critique calls.
+
+#### PG-016 — Implement claim extraction, evidence clustering, and source caching
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-015
+
+**Outcome:** Implemented strict source-backed extraction, deterministic twelve-claim retention and exact evidence clustering, progressive provisional evidence events, and split canvas-scoped query/content caches with freshness, expiry, and retained-content enforcement.
+
+**Done when:**
+
+- One source can back multiple claims and one claim can reference multiple independent sources.
+- Claims record classification, evidence type, strength, limitations, and source IDs.
+- Claims record canonical `topic_keys`, `mechanism_tags`, `contradiction_target_key`, and source IDs; sources record canonical `independence_key` values used by deterministic retention and support counting.
+- Duplicate, irrelevant, unsupported, and contradicting evidence are handled explicitly.
+- At most twelve claims are retained using the source hierarchy, source authority, independent-source count, strength, recency, and stable-ID tie-breaking.
+- A deterministic `clustering` checkpoint groups claims by the exact tuple of evidence type, sorted topic keys, sorted mechanism tags, and normalized contradiction target without losing source provenance; independent support counts distinct accepted source `independence_key` values.
+- Migrations create separate canvas-scoped `research_query_cache` and `source_content_cache` tables, their exact-key/freshness indexes, and DQ-003 deletion/redaction behavior from design section 12.11.
+- Query-cache lookup uses only known pre-request fields; source-content lookup uses normalized URL plus freshness before retrieval and persists content hash as immutable identity afterward. Repeat-hit, expiry, changed-hash, changed-key, and deletion tests prove reuse and invalidation behavior.
+- Cached results retain original retrieval metadata and a cache-hit marker so they cannot be presented as newly retrieved.
+- Telemetry records extraction/retention counts, cluster counts, independent-source counts, cache hits/misses, and invalidation reasons.
+- Each schema-valid extraction batch emits progressive provisional evidence; no source or claim becomes authoritative or selectable until its research patch is accepted.
+- Rendered excerpts are sanitized before they reach the browser.
+- Rejected sources and claims follow design section 8.2.1 and are excluded from context, quality thresholds, synthesis, and critique.
+- Tests prove clustering is stable under input reordering, contradiction targets split clusters correctly, multiple independent source keys count separately, and syndicated copies sharing a source `independence_key` count only once.
+
+#### PG-015 — Implement secure research adapters
+
+**Completed:** July 14, 2026
+
+**Outcome:** Added bounded OpenAI hosted-search, GitHub, Stack Exchange, HTTPS URL, and user-text adapters with structured rate-limit/telemetry behavior. User URL ingestion now uses a same-canvas fenced reservation, performs all retrieval outside transactions, pins validated public DNS addresses across redirects, enforces all design limits, stores only citations/hashes/sanitized excerpts, exposes idempotent source APIs, and passes concurrency, reclaim, SSRF, decompression, retention, lifecycle, and index-plan tests.
+
+#### PG-014 — Implement provider ports and execution profiles
+
+**Completed:** July 14, 2026
+
+**Outcome:** Added distinct typed ports for all six provider-backed stages, one shared deterministic-clustering port, immutable registered profile configurations, and a profile-driven executor with no demo-mode branch. The approved live, hybrid, and replay compositions route exactly as designed; product resolution rejects unknown and Phase 2 test profiles, and frozen provider identity remains part of checkpoint hashing.
+
+#### PG-013 — Build deterministic operation-specific context selection
+
+**Completed:** July 14, 2026
+
+**Outcome:** Replaced full-canvas snapshots with cycle-safe, operation-specific dependency traversal and deterministic tier packing. Context construction now reserves contradictory evidence first, honors pinned branch anchors, caches canonical semantic token upper bounds, excludes layout/UI state, records included and excluded nodes/edges, and rejects mandatory or fully serialized overflow with `422 context_too_large`.
+
+#### PG-012 — Define strict pipeline domain schemas and strategy templates
+
+**Completed:** July 14, 2026
+
+**Outcome:** Added the versioned 14-strategy catalog and strict, production stage validators for planning, research, extraction, clustering, synthesis, critique, and dependency-aware graph-patch output. Canonical claim/source relations, separate opportunity dimensions, structured support thresholds, IP checks, and malformed-output rejection are covered by focused tests.
+
+#### DQ-008 — Select the canonical demo opportunity
+
+**Completed:** July 14, 2026
+
+**Outcome:** Selected the security-questionnaire workflow and recorded its inputs, evidence expectations, opportunity shape, reset state, and immutable `security_questionnaires_v1` fixture identifier in `design.md` section 32.1.
+
+#### DQ-005 — Decide explicit-neighborhood versus semantic-similarity context
+
+**Completed:** July 14, 2026
+
+**Outcome:** Selected deterministic explicit graph neighborhoods for the MVP, with no embedding fallback, and recorded ranking, cost, fallback, and test implications in `design.md` section 32.1.
+
+### Phase 2 — Durable jobs and progress
+
+#### PG-011 — Verify the durable-job architecture end to end
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-008, PG-009, PG-010
+
+**Outcome:** Demonstrate reliable job execution under concurrency and interruption before adding live intelligence.
+
+**Done when:**
+
+- A deterministic test-double job progresses from queued to completed and emits replayable stage events without depending on the Phase 3 fixture-bundle system.
+- The Phase 2 test profile is proven unreachable from product requests.
+- Reclaim after lease expiry cannot produce duplicate finalization.
+- SSE reconnect resumes after the supplied canvas sequence, including when concurrent runs interleave events.
+- A failed job resumes at its first incomplete stage.
+- No test or trace shows an external call, retry sleep, or streaming loop inside a database transaction.
+- The Phase 2 review hardening closes DQ-003 at direct source-node and durable-payload boundaries, including source aliases and 500-character limits before graph-operation audit persistence.
+- Composite branch regeneration executes phase-local stable target batches, resumes matching checkpoints after failure, honors cancellation without a partial patch, and emits exactly one deterministic patch unit per frozen target.
+- Cancellation is rechecked atomically while entering `patch_ready`, explicit retries emit `run.resumed`, and expired `patch_ready` recovery acquires a fresh fenced lease epoch before completion.
+- Idempotent run replay preserves its creation-time SSE baseline after progress has been emitted, the actual combined claim query has representative index-plan coverage, and a live Uvicorn integration test proves incremental SSE delivery.
+
+#### PG-010 — Add cancellation, terminal failures, and bounded worker recycling
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-007, PG-008, PG-009
+
+**Outcome:** Make long-running work recoverable and prevent poison jobs or worker growth from degrading the system.
+
+**Done when:**
+
+- `POST /api/generation-runs/{run_id}/cancel` locks the run: queued runs become cancelled immediately, running runs receive a cancellation request finalized only by the fenced worker, duplicate cancelled requests return the existing result, and completed/non-cancellable states return `409`.
+- `POST /api/generation-runs/{run_id}/retry` requeues only a failed run with a retryable error, no active lease, and remaining attempts; it preserves immutable inputs/checkpoints, emits `run.retry_requested`, and returns `409` for cancelled, non-retryable, lease-owned, or exhausted runs.
+- Runs fail terminally after the configured maximum attempts with a structured error and `run.failed` event.
+- Failures preserve completed checkpoints and never leave permanent loading state.
+- Workers exit gracefully after 50 jobs or 14,400 seconds and release connections, lease threads, queries, caches, and large payloads between jobs.
+- Attempt, cancellation, exhausted-job, retry, and recycling telemetry is emitted by this component.
+- Tests cover concurrent cancel-versus-claim/finalize, at-most-one `run.cancelled` event, explicit safe retry, exhausted retry rejection, poison jobs, lease loss, worker crash recovery, and clean recycling.
+
+#### PG-009 — Implement persisted canvas-scoped SSE progress
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-006
+
+**Outcome:** Stream and replay generation progress through one SSE connection per canvas.
+
+**Done when:**
+
+- `GET /api/canvases/{canvas_id}/events?after={canvas_sequence}` replays committed events in ascending canvas-sequence order and then waits for new ones.
+- Appending an event allocates its monotonic canvas sequence through `canvas_event_cursor` and inserts the event in the same short transaction.
+- All design section 17 event types include both canvas and run sequences.
+- Research-source and extracted-evidence events carry `provisional: true`, and progress handling never treats them as authoritative graph mutations.
+- Persisted payloads follow DQ-003 retention/redaction rules, including replay and canvas deletion.
+- Heartbeat comments keep idle streams alive, and disconnect/reconnect does not lose progress.
+- Compression/buffering middleware does not materialize `text/event-stream` responses.
+- Integration tests interleave at least two concurrent runs on one canvas and prove replay skips or duplicates no committed event.
+- The setup guide records the ASGI command, proxy settings if used, and an incremental `curl -N` verification.
+
+#### PG-008 — Implement stage checkpoints, retry, and resume
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-007
+
+**Outcome:** Resume failed runs from the first incomplete stage without repeating valid completed work.
+
+**Done when:**
+
+- Stage input hashes include semantic input, stage version, provider identity, profile, and fixture version supplied through the injected durable-layer ports.
+- The worker executes only the stages configured for the run operation; deterministic clustering is checkpointed with its versioned application-stage identity.
+- Completed stage outputs are immutable, pass the generic Phase 2 envelope and the injected stage-specific validator, and are reusable only on an exact key match.
+- The worker executes external calls outside database transactions using the two-transaction stage protocol.
+- Retry provides at-least-once execution while graph state remains isolated behind unapplied patches.
+- Integration tests prove completed stages are reused and invalidated stages are rerun.
+- Stage duration, attempt, failure/retry, model-response-ID, and token-usage hooks emit structured telemetry even when a test adapter supplies the values.
+
+#### PG-007 — Implement queue claiming and fenced worker leases
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-006
+
+**Outcome:** Claim work safely through PostgreSQL `SKIP LOCKED` with stale-worker fencing.
+
+**Done when:**
+
+- The worker claims one eligible run using `SELECT ... FOR UPDATE SKIP LOCKED` in a short transaction.
+- Claim and expired-lease reclaim queries use the partial indexes from design section 12.14, with representative `EXPLAIN` assertions at production-like cardinality.
+- Every claim atomically increments `attempt` and `lease_epoch` and assigns `worker_id` plus a fresh lease token.
+- Every worker checkpoint/finalization write verifies run ID, running status, lease token, and lease epoch.
+- A lease-keeper renews heartbeats on its own database connection every 10–15 seconds.
+- The default lease is 60 seconds, heartbeat and expiry use PostgreSQL time, and renewal extends only the current token/epoch lease.
+- Queue-depth, claim-attempt, heartbeat-failure, and lease-loss telemetry is emitted with run/canvas/worker identifiers.
+- Expired or queued rows at `max_attempts` are terminalized with a poison-job error and one `run.failed` event instead of remaining claimable or stuck in `running`.
+- Concurrent-worker tests cover first-claim/reclaim attempt increments, exhausted-crash terminalization, delayed-but-valid heartbeat, expiry/reclaim, late fenced renewal, and prove a stale worker cannot checkpoint or finalize after reassignment.
+
+#### PG-006 — Add generation persistence and run APIs
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-005, DQ-003
+
+**Outcome:** Persist generation state and expose an idempotent, version-checked entry point for operation-specific runs.
+
+**Done when:**
+
+- Migrations implement `generation_run`, `generation_stage`, `canvas_event_cursor`, `generation_event`, `graph_patch`, and `graph_patch_operation_decision` from design section 12.
+- Composite database constraints prove that every event and patch belongs to the same canvas as its run and that every patch decision can link only a graph operation from that patch's canvas; cross-canvas fixtures fail at the database boundary.
+- The durable layer defines stable `RunContextFactory`, `ExecutionProfileResolver`, and `StageOutputValidator` ports plus a generic validated stage-result envelope.
+- Deterministic test-only adapters exercise the Phase 2 system; they are unavailable to product requests and cannot silently substitute for an approved profile.
+- `POST /api/canvases/{canvas_id}/generation-runs` resolves session ownership and injected ports, locks the canvas before selected entities, validates the exact operation-specific kind/cardinality/review-state contract from design section 14.1, and captures one immutable semantic before-or-after state before creating the queued run and returning `202`, `run_id`, and `events_url`.
+- The supported operations are `generate_strategies`, `research_evidence`, `synthesize_opportunities`, and `regenerate_stale`; node scope resolves one target-localized production plan, while branch scope freezes the cycle-safe composite strategy/evidence/opportunity workset and unsupported combinations return `422`.
+- Idempotency keys are unique per canvas: an identical request returns the existing run and a conflicting reuse returns `409`.
+- `GET /api/generation-runs/{run_id}` returns status, current stage, attempts, structured terminal error, and ready patch ID when present.
+- Run context snapshots, manifests, semantic hashes, selected node versions, branch target IDs/versions/distances/anchors, retry fields, request fingerprints, and immutable execution configuration are stored.
+- Unique constraints protect stage keys, canvas event sequences, run event sequences, and per-operation patch decisions.
+- Generation-run migrations include the queue claim/reclaim indexes required by design section 12.14; the later demo-session migration adds its active-session index when that foreign key exists.
+- The cursor migration backfills every existing canvas, and the canvas-creation path atomically creates a cursor row for every future canvas.
+- The DQ-003 deletion path is extended and integration-tested across runs, stages, cursor/events, patches/decisions, and every later canvas-scoped persistence table.
+- Run creation emits the shared structured-log context and applicable run/canvas/session/operation identifiers required for later run, stage, worker, and provider instrumentation.
+- Tests cover allowed state transitions and terminal states, exact before-or-after context capture during a concurrent graph mutation, branch workset cycle/convergence deduplication, and rejection of mixed-revision snapshots.
+
+#### DQ-003 — Define retained-source-content lifecycle
+
+**Completed:** July 14, 2026
+
+**Depends on:** None
+
+**Outcome:** Define what source content may be retained, for how long, and how deletion propagates across every persistence surface.
+
+**Done when:** The policy covers graph nodes, stage outputs, persisted event payloads, source-ingestion reservations, both normalized cache tables, fixture bundles, canvas deletion, user-visible disclosure, and verification requirements for PG-006, PG-009, PG-015, PG-016, and PG-019.
+
+#### PG-005 — Complete Phase 1 persistence and graph-foundation verification
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-003, PG-004
+
+**Outcome:** Prove the graph foundation survives real editing and reload flows.
+
+**Done when:**
+
+- Save/reload preserves graph content, metadata, positions, entity versions, and canvas revision.
+- Concurrent stale edits produce a recoverable UI conflict instead of overwriting newer state.
+- Tests cover node/edge CRUD, incident-edge and branch-anchor node-delete rejection/retry, operation idempotency and conflicting-key reuse, metadata field ownership, semantic/position version and timestamp isolation, global/branch constraint anchoring and pinning, operation ordering, revision increments, index-backed graph access, auto-layout persistence, and reload.
+- The canonical goal-plus-builder-constraints setup works end to end.
+- A live browser/API/PostgreSQL test covers the canonical layout bounds, drag/reload persistence, and a stale edit from a concurrent API client.
+- Phase 1 setup and verification commands are documented.
+
+#### PG-004 — Build the editable graph canvas
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-003
+
+**Outcome:** Let a user create and manipulate the typed graph through a browser canvas.
+
+**Done when:**
+
+- A user can create/open a canvas and add goal and constraint nodes.
+- Typed nodes and edges render distinctly without supporting arbitrary ontology editing.
+- A user can select nodes, edit semantic content, add/remove edges, delete entities, and move nodes.
+- Deleting a node with incident edges or anchored branch constraints presents the conflict, guides the user through explicit dependency resolution, and retries without hiding any removal from history.
+- A user can mark a constraint as pinned global or branch-scoped, choose a valid branch root, reanchor it, and see that semantic state survive reload.
+- Node movement is persisted through idempotent localized `MOVE_NODE` operations using position-version preconditions.
+- An auto-layout action produces readable deterministic placement without changing semantic graph state.
+
+#### PG-003 — Implement canvas and localized graph-operation APIs
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-002
+
+**Outcome:** Support canvas CRUD and localized graph mutations rather than whole-graph replacement.
+
+**Done when:**
+
+- Canvas endpoints implement the API surface in design section 27.1.
+- `POST /api/canvases/{canvas_id}/operations` supports `ADD_NODE`, `UPDATE_NODE`, `DELETE_NODE`, `ADD_EDGE`, `UPDATE_EDGE`, `DELETE_EDGE`, `PATCH_NODE_METADATA`, and `MOVE_NODE`.
+- Every direct mutation includes a client-generated operation key; exact retry returns the original result and conflicting key reuse returns `409`.
+- `GET /api/canvases/{canvas_id}/operations?after={revision}` returns every later operation in deterministic revision-and-operation order for incremental synchronization.
+- Semantic node mutations validate `expected_version`; `MOVE_NODE` validates `expected_position_version`; edge updates/deletes validate the edge version.
+- Semantic mutations increment only the semantic version, update `semantic_updated_at`, and invalidate token metadata; `MOVE_NODE` increments only the position version and updates only position/general timestamps, so layout changes cannot invalidate generation or graph-patch preconditions.
+- `UPDATE_NODE` and `PATCH_NODE_METADATA` enforce the same per-kind writable-field allowlists; attempts to smuggle or directly write server-owned review, support, stale, source-identity, provenance, or lineage fields are rejected without creating an operation.
+- `DELETE_NODE` returns `409` with incident edge IDs/versions and referencing branch-constraint IDs/versions until the client resolves those dependencies through audited operations; it never silently cascades.
+- Pinning/unpinning, changing a constraint's context scope, or reanchoring its branch root is an audited semantic mutation with an expected-version precondition and kind/same-canvas validation.
+- Each successful mutation locks the canvas before entity rows, appends a `graph_operation`, and increments the canvas revision in the same short transaction.
+- Canvas deletion removes every Phase 1 canvas-scoped record; later persistence migrations must extend the same lifecycle deletion test.
+- API tests cover validation, metadata ownership, wrong-kind fields, rollback, cross-canvas branch anchors, incremental operation replay, canvas-first locking, and optimistic conflicts.
+
+#### PG-002 — Implement the relational graph schema
+
+**Completed:** July 14, 2026
+
+**Depends on:** PG-001
+
+**Outcome:** Persist canvases, typed nodes, typed edges, and append-only graph operations using the frozen domain taxonomy.
+
+**Done when:**
+
+- Migrations create `canvas`, `node`, `edge`, `graph_operation`, and `node_staleness_cause` records aligned with design sections 9 and 12.
+- Nodes and edges belong to one canvas; nodes carry independent semantic and position versions/timestamps, while edges carry an entity version.
+- Node semantic content is separated from position and UI-only state.
+- Constraint metadata validates `context_scope: global | branch` and `pinned: boolean`; branch scope requires one relational same-canvas `branch_root_node_id` of kind strategy, claim, or opportunity, while global scope requires a null root.
+- Nodes persist queryable stale state and an append-only, operation-linked cause ledger with database-enforced same-canvas references and valid active/cleared records.
+- Node and edge kinds are validated against the frozen MVP taxonomy.
+- Referential integrity prevents cross-canvas edges, branch anchors, staleness causes, and dangling endpoints.
+- Graph operations store an actor-scoped operation key and request fingerprint with a uniqueness constraint per canvas.
+- Migrations add the required node, edge, graph-operation, active-staleness, and branch-anchor access-path indexes from design section 12.14; representative query-plan checks avoid full scans.
+
+#### PG-001 — Bootstrap the application runtime
+
+**Completed:** July 14, 2026
+
+**Depends on:** None
+
+**Outcome:** Establish the smallest runnable Django, PostgreSQL, browser-client, and test foundation without introducing infrastructure excluded by the design.
+
+**Done when:**
+
+- The Django ASGI web process starts locally and connects to PostgreSQL through environment-based configuration.
+- A separate worker entry point exists, even if generation work is not implemented yet.
+- The browser client has a documented, reversible build/development setup.
+- Setup includes baseline formatting, static analysis, and test commands.
+- No Redis, Celery, Neo4j, or WebSocket dependency is introduced.
 
 #### DQ-001 — Choose progressive or post-extraction evidence display
 

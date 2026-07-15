@@ -93,7 +93,7 @@ The MVP must allow a user to:
 
 1. Create a canvas.
 2. Add a goal and builder constraints.
-3. Generate at least three distinct opportunity strategies.
+3. Generate exactly three distinct opportunity strategies.
 4. Select one strategy and research evidence.
 5. Inspect source-backed evidence claims.
 6. Select evidence and generate opportunity candidates.
@@ -375,6 +375,8 @@ Evidence rejection is one short graph transaction. It locks the canvas first, va
 5. Technical discussions and forums
 6. Anonymous individual comments
 
+Authority is derived from source identity rather than keywords in an arbitrary URL. Government and educational publishers, plus first-party vendor documentation, API, pricing, legal, security, support, terms, and trust surfaces, qualify for rank 1 only when normalized publisher identity plus host/title evidence proves that first-party relationship. A generic path word such as `pricing`, `docs`, or `security` is never sufficient by itself. GitHub discussions and Stack Exchange questions retain their discussion/forum hierarchy regardless of repository or path names. User-supplied URLs use the same classifier as retrieved web results rather than receiving an unconditional rank. Third-party commentary that merely mentions pricing, documentation, or a vendor does not.
+
 ### 8.4 MVP evidence sources
 
 Required:
@@ -422,6 +424,8 @@ Avoid in MVP:
 
 Extraction emits sorted, deduplicated `topic_keys` and `mechanism_tags` as normalized lowercase slugs. `mechanism_tags` use the versioned opportunity-strategy vocabulary where applicable. `contradiction_target_key` is either null or a stable graph/entity or normalized mechanism key identifying what a contradicting claim challenges; it is available before graph-patch construction and participates in deterministic clustering.
 
+Extraction also emits the sorted, deduplicated ID set of every candidate claim considered and a typed rejected-evidence ledger whose entries identify either a `source` or a `claim`. Retained and rejected claim IDs exactly partition that candidate set. Every researched source is likewise either retained exactly once or explicitly rejected, and rejected source IDs must come from the immediately preceding research checkpoint. The audit envelope is bounded at ten source identities and one hundred candidate claim identities; deterministic retention still caps the retained claim set at twelve.
+
 ### 8.6 Source schema
 
 ```json
@@ -440,7 +444,7 @@ Extraction emits sorted, deduplicated `topic_keys` and `mechanism_tags` as norma
 }
 ```
 
-`independence_key` belongs to the source or originating dataset, not to the claim. A claim may reference many sources, and its independent-support count is the number of distinct accepted source `independence_key` values among those references. Syndicated or mirrored sources share one key and therefore count once. Claim-source references and their accepted/rejected state are the canonical support relation; denormalized `source_ids` in structured output must be validated against those relations when graph operations are constructed.
+`independence_key` belongs to the source or originating dataset, not to the claim. A claim may reference many sources, and its independent-support count is the number of distinct accepted source `independence_key` values among those references. Web publisher identity is the registrable domain, so `www.example.com` and `docs.example.com` do not count independently. Sources with identical retained-content hashes from different publishers are normalized to one mirror identity within the bounded research result. Syndicated or mirrored sources therefore share one key and count once. Claim-source references and their accepted/rejected state are the canonical support relation; denormalized `source_ids` in structured output must be validated against those relations when graph operations are constructed.
 
 ---
 
@@ -841,6 +845,8 @@ CREATE TABLE graph_patch (
     canvas_id uuid NOT NULL REFERENCES canvas(id),
     base_canvas_revision bigint NOT NULL,
     operations jsonb NOT NULL,
+    regeneration_target_ids jsonb NOT NULL DEFAULT '[]',
+    permitted_stale_resolution_ids jsonb NOT NULL DEFAULT '[]',
     client_id_map jsonb NOT NULL DEFAULT '{}',
     status text NOT NULL,
     regenerated_by_run_id uuid,
@@ -855,6 +861,8 @@ CREATE TABLE graph_patch (
 ```
 
 Allowed patch statuses are `pending`, `applied`, `partially_applied`, and `rejected`.
+
+For a non-regeneration patch, both regeneration arrays are empty. A Phase 3 regeneration patch persists the complete frozen production-unit IDs in `regeneration_target_ids` and the complete stale member IDs that Phase 4 is permitted to resolve in `permitted_stale_resolution_ids`. These fields are immutable candidate-patch declarations, not an instruction to clear staleness. PG-023 applies only the subset allowed by the lineage mode selected in DQ-004: replacement mode may clear permitted reused or deleted targets, while parallel mode clears none of the old-node causes.
 
 ### 12.10 Graph patch operation decision
 
@@ -916,7 +924,7 @@ CREATE TABLE source_content_cache (
 );
 ```
 
-Both tables have indexes supporting lookup of an unexpired entry by canvas and known pre-request fields. The default freshness window is 24 hours; DQ-003 may set a shorter retention period, redact `retained_content`, or forbid content retention without changing key semantics.
+Both tables have indexes supporting lookup of an unexpired entry by canvas and known pre-request fields. Under DQ-003, cache rows expire and are physically removed after 24 hours, and `source_content_cache.retained_content` remains null; the row retains only source identity and retrieval metadata.
 
 ### 12.12 Source ingestion reservation
 
@@ -989,6 +997,16 @@ CREATE INDEX demo_session_expiry_idx ON demo_session (expires_at, id);
 ```
 
 Unique indexes already serving an exact access path need not be duplicated. Representative `EXPLAIN` assertions verify that queue claim/reclaim, bidirectional dependency traversal, active staleness lookup, source-ingestion reclaim, concurrent demo-run counting, and expired-session cleanup do not regress to full-table scans at production-like cardinalities.
+
+### 12.15 Retained-source-content lifecycle
+
+Proofgraph retains derived evidence, not complete retrieved documents. Retrieved HTML, full page text, and complete user-supplied source documents are transient inputs and must never be written to graph nodes, run context, stage output, persisted event payloads, caches, or fixture recordings.
+
+Persisted source material is limited to citation metadata, normalized URLs, retrieval timestamps, content hashes, derived claims, and sanitized excerpts or provider snippets of at most 500 Unicode characters each. Accepted graph evidence and derived run, stage, event, patch, and audit records remain until their canvas is deleted. Future query-cache rows expire and are physically removed after 24 hours; `source_content_cache.retained_content` is always null, so a content cache row preserves identity and retrieval metadata but never a reusable document body.
+
+Fixture bundles may contain only synthetic or explicitly redistributable source material. They are immutable release assets rather than canvas-owned user data, so canvas deletion does not modify them; retiring a fixture deletes the complete versioned bundle. The product disclosure states that Proofgraph stores derived evidence and citations rather than copies of retrieved pages.
+
+Canvas deletion is the authoritative user-data deletion boundary. It removes graph state, runs, stages, cursor/events, patches/decisions, source-ingestion reservations, and both cache key spaces in one lifecycle operation. Persistence entry points reject raw-content fields and overlong excerpts before writing, and tests seed sentinel source text to prove that it never reaches any durable payload.
 
 ---
 
@@ -1207,7 +1225,9 @@ Evidence emitted during research progress is provisional. It may be inspected as
 
 #### Plan
 
-For `generate_strategies`, produces at least three materially different strategies adapted from the curated ontology.
+For `generate_strategies`, produces exactly three materially different strategies adapted from the curated ontology.
+
+The MVP contract is exactly three candidates with distinct normalized titles and approaches. Planning output passes the same intellectual-property and third-party-terms policy as synthesis: it may adapt public strategic patterns but may not recommend copying protected code, assets, private datasets, trademarks, or proprietary product expression.
 
 For `research_evidence`, produces:
 
@@ -1215,6 +1235,8 @@ For `research_evidence`, produces:
 - Research questions
 - Query plan
 - Required evidence types
+
+The one research plan is bound to the explicitly selected strategy: `selected_strategy_id` and `target_node_id` both equal that selection. During claim regeneration, the selected strategy must instead be a semantic ancestor of the claim target, or the in-run replacement mapped from such an ancestor; a merely visible or same-canvas strategy is invalid.
 
 For `regenerate_stale`, `Plan` is target-localized: it emits one strategy replacement for each strategy target or one research plan for each claim/evidence target in the frozen workset.
 
@@ -1263,6 +1285,8 @@ Checks:
 #### Patch construction
 
 Produces typed graph operations only.
+
+Patch construction is an exact materialization of the validated checkpoints, not a permissive graph suggestion. Node provenance must equal the checkpoint parents that produced it, and the patch must contain exactly the required typed lineage edges with the correct direction and evidence signal; missing, extra, reversed, duplicated, or signal-spoofed relations are invalid. A stale-regeneration patch declares the complete frozen production-unit target set and the complete stale-node set that Phase 4 is permitted to resolve—never a non-empty subset—and may not authorize unrelated stale nodes. Phase 3 never claims that those causes were already cleared.
 
 ---
 
@@ -1822,6 +1846,8 @@ It must not recommend:
 - Reusing private datasets
 - Violating third-party API terms
 
+Planning, synthesis, and critique pass through one deterministic, clause-aware prohibited-intent gate after strict schema validation. The gate evaluates recommendation intent and protected-material concepts together, recognizes material paraphrases such as reimplementing closed-source internals or importing non-public records, and treats explicit negated guardrails such as “do not copy proprietary code” as compliant. Descriptive evidence and risks may mention prohibited conduct without recommending it. Focused adversarial tests cover paraphrases, negation, descriptive-risk language, trademarks, private data, access-control circumvention, and third-party terms.
+
 ### 21.4 Anonymous resource authorization
 
 Every anonymous request resolves the signed demo session before looking up or mutating a resource. Canvas and graph-operation endpoints require the requested canvas to equal the session's active canvas. Run endpoints require matching `demo_session_id`; SSE, patch, source, and ingestion endpoints resolve their owning run or canvas and enforce the same session ownership. Reset, expiry cleanup, and canvas replacement use the identical authorization service. Possession of a canvas, run, patch, source, or ingestion UUID is never authorization.
@@ -2012,6 +2038,7 @@ Include:
 - Claim count
 - Error code
 - Execution profile and fixture-bundle version
+- Cache hit/miss outcome and, on a miss, one normalized invalidation reason: `not_found`, `expired`, `freshness_expired`, or `version_or_context_changed`
 
 ### 25.2 Metrics
 
@@ -2127,10 +2154,13 @@ fixtures/
         ├── synthesis-outputs.json
         ├── critique-outputs.json
         ├── patch-construction-outputs.json
-        └── progress-events.json
+        ├── progress-events.json
+        └── semantic-input-hashes.json
 ```
 
 The plural output files contain manifest-indexed cases for every operation and semantic input hash used by the bundle. Full replay must provide an output for every provider-backed stage in every supported operation plan, including strategy/evidence/opportunity patch construction.
+
+Every case has a non-optional semantic-input commitment. The bundle hashes every non-manifest asset and records the patch-builder version plus a normalized source hash, so changing a payload, progress event, semantic commitment, or deterministic patch algorithm requires a new reviewed fixture identity. Semantic preimages included in the manifest are recomputed at load time; the commitment document must also cover every case exactly. Redundant extraction audit fields whose value is already fixed by the retained/rejected partition do not alter downstream fixture selection.
 
 All fixture payloads pass through the same Pydantic validation used for live provider outputs.
 
@@ -2296,6 +2326,7 @@ Official rules:
 - Opportunity synthesis
 - Critique
 - GraphPatch generation
+- Persisted regeneration-target and permitted-resolution declarations
 - Ports-and-adapters execution profiles
 - Versioned fixture bundles
 
@@ -2376,18 +2407,18 @@ The MVP is complete when a first-time user can:
 ### 32.1 Resolved decisions
 
 1. **DQ-001 — Progressive evidence display:** validated extraction batches appear progressively as provisional evidence. They become authoritative and selectable for synthesis only after the user accepts the evidence patch.
+2. **DQ-003 — Derived-evidence-only retention:** persist citations, hashes, derived claims, and sanitized excerpts of at most 500 Unicode characters, never complete retrieved or user-supplied source documents. Derived records live until canvas deletion, future cache rows expire after 24 hours, fixture content must be synthetic or redistributable, and every durable payload is verified against the retention policy.
+3. **DQ-005 — Explicit graph neighborhoods for MVP context:** Phase 3 uses only the operation-specific graph neighborhood and dependency directions from sections 9.2.1 and 13. Traversal is cycle-safe breadth-first search with deterministic tier ranking, semantic-recency ordering, and stable-ID tie-breaking; it performs no embedding call and incurs no semantic-search storage or provider cost. If an optional graph tier is empty or disconnected, it remains empty rather than falling back to fuzzy similarity. Semantic similarity is deferred until evaluation demonstrates that explicit neighborhoods miss material context. Tests cover directionality, cycles, disconnected branches, stable truncation, layout independence, and the hard serialized-input cap.
+4. **DQ-008 — Canonical security-questionnaire opportunity:** the canonical scenario is a small B2B SaaS vendor trying to reduce the repeated work and enterprise-sales delay caused by security questionnaires. Inputs describe a small technical team, a six-week MVP horizon, public or user-approved evidence only, and no promise to replace legal or security review. Expected evidence covers repeated questionnaire labor, deal-cycle delay, spreadsheet/document workarounds, existing spend, identifiable security/sales-operations buyers, crowded incumbent tooling, trust and integration burden, and falsifying no-budget or low-recurrence signals. The expected opportunity is an evidence-backed questionnaire response workspace with reusable approved answers, provenance, reviewer workflow, and a cheap concierge validation experiment. The reset state contains the goal and builder constraints before generation; the immutable bundle ID is `security_questionnaires_v1`.
 
 ### 32.2 Open questions
 
 These do not block the architecture, but must be resolved before the dependent implementation task:
 
 2. **DQ-002:** Should rejected evidence remain visible as a muted node for auditability?
-3. **DQ-003:** What source content may be retained, for how long, and how is it removed consistently from graph nodes, stage outputs, persisted event payloads, normalized caches, fixture bundles, and canvas deletion?
 4. **DQ-004:** Should explicit stale-node regeneration replace the old branch or always create a parallel branch?
-5. **DQ-005:** Should the first version support automatic semantic similarity, or rely only on explicit graph neighborhoods?
 6. **DQ-006:** Should the evaluation harness ship in the product UI or remain an internal benchmark?
 7. **DQ-007:** What is the final product name?
-8. **DQ-008:** Which canonical opportunity should be used in the demo?
 
 ---
 
@@ -2437,6 +2468,7 @@ These do not block the architecture, but must be resolved before the dependent i
 - Live research is backed by a hybrid deterministic demo profile and a full replay fallback.
 - The public demo uses isolated expiring anonymous sessions, endpoint-wide resource authorization, server-side profile allowlists, CSRF protection, and PostgreSQL-backed session/global quotas.
 - Every critical queue, traversal, reclaim, and expiration access path has an owned PostgreSQL index and query-plan verification.
+- Durable storage retains derived evidence and bounded sanitized excerpts, never complete retrieved source content; canvas deletion removes all canvas-owned derived records.
 - The MVP targets Work & Productivity.
 
 ---
@@ -2488,7 +2520,19 @@ These do not block the architecture, but must be resolved before the dependent i
 - Run creation and graph mutation share a canvas-first lock order, and context packing enforces the fully serialized token limit.
 - Branch constraints have explicit anchors, direct metadata writes have per-kind ownership rules, and opportunity outputs include distribution and defensibility rationale.
 - Anonymous sessions have a 24-hour lifecycle with endpoint-wide resource authorization and fenced cleanup.
+
+### v7
+
+- DQ-003 is resolved with derived-evidence-only retention, 500-character excerpt bounds, no retained page bodies, 24-hour future-cache expiry, and canvas-wide lifecycle deletion.
+- Phase 3 validation now requires audit-complete extraction, exact selected-strategy and checkpoint lineage binding, complete stale-target resolution, versioned mechanism tags, explicit cache invalidation reasons, PostgreSQL-time ingestion leases, and fully committed fixture assets/build logic.
 - Component telemetry ownership, correlation identifiers, and required PostgreSQL access-path indexes are explicit.
+
+### v8
+
+- Source authority uses shared publisher-aware classification; generic URL path words cannot promote third-party commentary, and user-supplied URLs follow the same rules.
+- Web independence keys use registrable publisher domains and identical-content mirror normalization before clustering and support counting.
+- Intellectual-property enforcement is clause-aware and intent-sensitive, covering material paraphrases while allowing negated guardrails and descriptive risks.
+- Phase 3 regeneration patches persist mode-neutral target and permitted-resolution declarations; DQ-004 remains the Phase 4 decision that controls actual stale-cause clearing.
 
 ---
 

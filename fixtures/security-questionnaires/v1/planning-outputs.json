@@ -1,0 +1,149 @@
+{
+  "outputs": {
+    "canonical_generate": {
+      "operation": "generate_strategies",
+      "strategies": [
+        {
+          "id": "strategy_productize_service",
+          "template_id": "productize_recurring_service",
+          "title": "Productize the recurring questionnaire workflow",
+          "approach": "Turn repeated answer gathering, review, and delivery into a bounded reviewer-controlled workflow.",
+          "rationale": "The team already performs recurring structured work that can be standardized without replacing expert review.",
+          "required_signal_matches": ["customers already pay for the outcome", "the workflow repeats"],
+          "failure_condition_risks": ["Most answers may require bespoke expert judgment"]
+        },
+        {
+          "id": "strategy_replace_spreadsheet",
+          "template_id": "replace_critical_spreadsheet",
+          "title": "Replace the questionnaire tracking spreadsheet",
+          "approach": "Replace fragile spreadsheet and document handoffs with approved-answer provenance and explicit ownership.",
+          "rationale": "A focused workflow can reduce coordination errors while remaining feasible for a small team.",
+          "required_signal_matches": ["errors have a real cost", "multiple people update it"],
+          "failure_condition_risks": ["A spreadsheet may remain sufficient for low-volume teams"]
+        },
+        {
+          "id": "strategy_rebundle_workflow",
+          "template_id": "rebundle_fragmented_workflow",
+          "title": "Rebundle evidence, answers, and review",
+          "approach": "Combine evidence lookup, answer reuse, reviewer approval, and delivery into one narrow workspace.",
+          "rationale": "The workflow spans several handoffs whose delays can be tested with a concierge MVP.",
+          "required_signal_matches": ["handoffs create delay or data loss", "users stitch together multiple tools"],
+          "failure_condition_risks": ["The participating owners may have incompatible workflows"]
+        }
+      ],
+      "research_plans": []
+    },
+    "canonical_research": {
+      "operation": "research_evidence",
+      "strategies": [],
+      "research_plans": [
+        {
+          "target_node_id": "$node:strategy",
+          "selected_strategy_id": "$node:strategy",
+          "research_questions": [
+            {
+              "id": "question_recurrence",
+              "question": "How often do small vendors repeat security questionnaire work?",
+              "evidence_type": "workflow_recurrence"
+            },
+            {
+              "id": "question_cost",
+              "question": "What labor or deal-delay cost does the workflow create?",
+              "evidence_type": "labor_cost"
+            }
+          ],
+          "query_plan": [
+            {
+              "id": "query_public_workflow",
+              "query": "security questionnaire repeated work deal delay small SaaS",
+              "provider": "openai_web_search",
+              "evidence_type": "workflow_recurrence"
+            }
+          ],
+          "required_evidence_types": [
+            {
+              "evidence_type": "workflow_recurrence",
+              "reason": "Recurrence is necessary for a durable workflow product.",
+              "minimum_independent_sources": 2
+            },
+            {
+              "evidence_type": "labor_cost",
+              "reason": "Existing labor or delay establishes economic leverage.",
+              "minimum_independent_sources": 1
+            }
+          ]
+        }
+      ]
+    },
+    "regenerate_strategy": {
+      "operation": "regenerate_stale",
+      "strategies": [
+        {
+          "id": "strategy_regenerated",
+          "target_node_id": "$node:target",
+          "template_id": "productize_recurring_service",
+          "title": "Regenerated reviewer-controlled questionnaire workflow",
+          "approach": "Refresh the strategy around approved-answer reuse, provenance, and explicit review.",
+          "rationale": "The replacement preserves the accepted constraints while addressing stale premises.",
+          "required_signal_matches": ["the workflow repeats"],
+          "failure_condition_risks": ["Most answers may require bespoke expert judgment"]
+        }
+      ],
+      "research_plans": []
+    },
+    "regenerate_claim": {
+      "operation": "regenerate_stale",
+      "strategies": [],
+      "research_plans": [
+        {
+          "target_node_id": "$node:target",
+          "selected_strategy_id": "$node:strategy",
+          "research_questions": [
+            {"id": "question_refresh_claim", "question": "What current evidence confirms or falsifies this stale claim?", "evidence_type": "workflow_recurrence"}
+          ],
+          "query_plan": [
+            {"id": "query_public_workflow", "query": "security questionnaire repeated work deal delay small SaaS", "provider": "openai_web_search", "evidence_type": "workflow_recurrence"}
+          ],
+          "required_evidence_types": [
+            {"evidence_type": "workflow_recurrence", "reason": "The stale claim needs current independent evidence.", "minimum_independent_sources": 1}
+          ]
+        }
+      ]
+    },
+    "regenerate_branch_strategy": {
+      "operation": "regenerate_stale",
+      "strategies": [
+        {
+          "id": "strategy_regenerated",
+          "target_node_id": "$node:target_strategy",
+          "template_id": "productize_recurring_service",
+          "title": "Regenerated reviewer-controlled questionnaire workflow",
+          "approach": "Refresh the strategy around approved-answer reuse, provenance, and explicit review.",
+          "rationale": "The replacement preserves the accepted constraints while addressing stale premises.",
+          "required_signal_matches": ["the workflow repeats"],
+          "failure_condition_risks": ["Most answers may require bespoke expert judgment"]
+        }
+      ],
+      "research_plans": []
+    },
+    "regenerate_branch_claim": {
+      "operation": "regenerate_stale",
+      "strategies": [],
+      "research_plans": [
+        {
+          "target_node_id": "$node:target_claim",
+          "selected_strategy_id": "strategy_regenerated",
+          "research_questions": [
+            {"id": "question_refresh_claim", "question": "What current evidence confirms or falsifies this stale claim?", "evidence_type": "workflow_recurrence"}
+          ],
+          "query_plan": [
+            {"id": "query_public_workflow", "query": "security questionnaire repeated work deal delay small SaaS", "provider": "openai_web_search", "evidence_type": "workflow_recurrence"}
+          ],
+          "required_evidence_types": [
+            {"evidence_type": "workflow_recurrence", "reason": "The stale claim needs current independent evidence.", "minimum_independent_sources": 1}
+          ]
+        }
+      ]
+    }
+  }
+}

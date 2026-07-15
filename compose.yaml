@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: proofgraph
+      POSTGRES_USER: proofgraph
+      POSTGRES_PASSWORD: proofgraph
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proofgraph -d proofgraph"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - proofgraph-postgres:/var/lib/postgresql/data
+
+volumes:
+  proofgraph-postgres:

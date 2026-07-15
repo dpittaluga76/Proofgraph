@@ -1,0 +1,11 @@
+{
+  "outputs": {
+    "canonical_generate_patch": {"$build_from_validated_checkpoints": "v1"},
+    "canonical_research_patch": {"$build_from_validated_checkpoints": "v1"},
+    "canonical_synthesis_patch": {"$build_from_validated_checkpoints": "v1"},
+    "regenerate_strategy_patch": {"$build_from_validated_checkpoints": "v1"},
+    "regenerate_claim_patch": {"$build_from_validated_checkpoints": "v1"},
+    "regenerate_opportunity_patch": {"$build_from_validated_checkpoints": "v1"},
+    "regenerate_branch_patch": {"$build_from_validated_checkpoints": "v1"}
+  }
+}

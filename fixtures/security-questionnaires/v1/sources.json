@@ -1,0 +1,51 @@
+{
+  "outputs": {
+    "canonical_research": {
+      "queries_executed": [
+        {
+          "id": "query_public_workflow",
+          "query": "security questionnaire repeated work deal delay small SaaS",
+          "provider": "openai_web_search",
+          "evidence_type": "workflow_recurrence"
+        }
+      ],
+      "sources": [
+        {
+          "id": "source_synthetic_benchmark",
+          "kind": "web",
+          "url": "https://fixtures.proofgraph.invalid/security-questionnaire-benchmark",
+          "title": "Synthetic security questionnaire workflow benchmark",
+          "retrieved_at": "2026-07-14T12:00:00Z",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "independence_key": "publisher:proofgraph-fixtures.invalid",
+          "authority": {
+            "domain": "fixtures.proofgraph.invalid",
+            "publisher": "Proofgraph synthetic fixtures",
+            "authoritative": false,
+            "hierarchy_rank": 4
+          },
+          "sanitized_excerpt": "Synthetic teams reported repeated answer lookup and reviewer handoffs across enterprise questionnaires.",
+          "cache_hit": false
+        },
+        {
+          "id": "source_synthetic_interviews",
+          "kind": "user_text",
+          "url": null,
+          "title": "Synthetic buyer interview summary",
+          "retrieved_at": "2026-07-14T12:05:00Z",
+          "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "independence_key": "dataset:synthetic-interviews-v1",
+          "authority": {
+            "domain": null,
+            "publisher": "Proofgraph synthetic fixtures",
+            "authoritative": false,
+            "hierarchy_rank": 5
+          },
+          "sanitized_excerpt": "Synthetic buyers described deal delay, spreadsheet tracking, and a need to keep human approval in the loop.",
+          "cache_hit": false
+        }
+      ],
+      "no_results_reason": null
+    }
+  }
+}

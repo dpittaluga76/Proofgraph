@@ -1,0 +1,129 @@
+{
+  "outputs": {
+    "canonical_synthesis": {
+      "operation": "synthesize_opportunities",
+      "opportunities": [
+        {
+          "id": "opportunity_answer_workspace",
+          "target_node_id": null,
+          "title": "Approved-answer questionnaire workspace",
+          "buyer": "Security operations lead",
+          "problem": "Repeated questionnaires delay enterprise deals and consume reviewer time.",
+          "current_spend_or_workaround": "Teams coordinate spreadsheets, documents, chat, and repeated expert review.",
+          "mechanism": "Reuse approved answers with source provenance, ownership, expiry, and reviewer controls.",
+          "business_model": "Subscription per vendor workspace",
+          "why_now": "Smaller SaaS vendors face expanding enterprise security review without enterprise tooling budgets.",
+          "evidence": [
+            {"claim_id": "$node:claim_deal_delay", "signal_type": "labor_cost", "independence_key": "dataset:synthetic-interviews-v1", "accepted": true},
+            {"claim_id": "$node:claim_repeated_labor", "signal_type": "demand", "independence_key": "publisher:proofgraph-fixtures.invalid", "accepted": true},
+            {"claim_id": "$node:claim_workaround_pain", "signal_type": "pain", "independence_key": "dataset:synthetic-interviews-v1", "accepted": true},
+            {"claim_id": "$node:claim_trust_burden", "signal_type": "contradiction", "independence_key": "dataset:synthetic-interviews-v1", "accepted": true}
+          ],
+          "contradiction": {"summary": "Trust requirements may favor incumbent platforms and human review.", "claim_id": "$node:claim_trust_burden", "evidence_gap": null},
+          "assumptions": [{"id": "assumption_recurring_volume", "statement": "Target teams receive enough questionnaires for reuse to matter.", "importance": "high"}],
+          "risks": [{"id": "risk_trust", "statement": "Buyers may distrust generated or stale answers.", "impact": "high", "mitigation": "Require provenance, expiry, and explicit reviewer approval."}],
+          "validation_experiment": {"id": "experiment_concierge", "hypothesis": "Teams will pay to reduce answer lookup and coordination time.", "method": "Run a reviewer-controlled concierge workflow for five design partners.", "metric": "Paid pilot commitments and median response time", "success_criteria": "Three paid pilots and a 30 percent response-time reduction", "timebox": "Two weeks"},
+          "builder_fit": "A small technical team can build the bounded ingestion, search, and approval workflow in six weeks.",
+          "distribution_channel": "Security-lead and B2B SaaS operator communities",
+          "distribution_rationale": "The identifiable buyer already gathers in focused practitioner groups and vendor networks.",
+          "defensibility": "Approved-answer history, integrations, and reviewer trust compound with continued use.",
+          "technical_feasibility": "The MVP needs document ingestion, structured answer records, provenance, search, and workflow state.",
+          "operational_burden": "Human review and source freshness checks remain necessary.",
+          "dimensions": {
+            "evidence_strength": {"rating": "medium", "rationale": "Two synthetic independent sources support recurrence, cost, and contradiction."},
+            "novelty": {"rating": "medium", "rationale": "The wedge is reviewer-controlled reuse rather than generic answer generation."},
+            "builder_fit": {"rating": "high", "rationale": "The bounded workflow fits a small technical team and six-week horizon."},
+            "technical_feasibility": {"rating": "high", "rationale": "The MVP uses conventional document and workflow components."},
+            "distribution_clarity": {"rating": "medium", "rationale": "Focused buyer communities provide an initial channel."},
+            "operational_burden": {"rating": "medium", "rationale": "Review and evidence freshness cannot be fully automated."}
+          },
+          "support_status": "supported"
+        },
+        {
+          "id": "opportunity_concierge_service",
+          "target_node_id": null,
+          "title": "Questionnaire response concierge",
+          "buyer": "Revenue operations lead",
+          "problem": "Small teams need temporary help coordinating complex questionnaires.",
+          "current_spend_or_workaround": "Founders and security staff interrupt roadmap work to coordinate responses.",
+          "mechanism": "Combine lightweight workflow software with a time-boxed reviewer concierge.",
+          "business_model": "Per-questionnaire service fee",
+          "why_now": "Enterprise security review is reaching vendors before they can justify broad compliance tooling.",
+          "evidence": [{"claim_id": "$node:claim_deal_delay", "signal_type": "labor_cost", "independence_key": "dataset:synthetic-interviews-v1", "accepted": true}],
+          "contradiction": {"summary": "Service delivery may require too much bespoke judgment.", "claim_id": null, "evidence_gap": "No independent willingness-to-pay evidence for a concierge service."},
+          "assumptions": [{"id": "assumption_service_margin", "statement": "A standardized workflow can keep service margins acceptable.", "importance": "high"}],
+          "risks": [{"id": "risk_service_load", "statement": "Bespoke review can overwhelm a small operator.", "impact": "high", "mitigation": "Limit scope and measure exception rates before productizing."}],
+          "validation_experiment": {"id": "experiment_service_offer", "hypothesis": "Teams will pay per questionnaire for coordination relief.", "method": "Offer five fixed-scope paid concierge pilots.", "metric": "Paid conversions and delivery hours", "success_criteria": "Two paid pilots under eight delivery hours each", "timebox": "Two weeks"},
+          "builder_fit": "The service can validate demand before deeper automation.",
+          "distribution_channel": "Founder and revenue-operations referrals",
+          "distribution_rationale": "The pain appears during active enterprise deals where peer referrals are credible.",
+          "defensibility": "Accumulated workflow templates may improve delivery, but service defensibility is initially weak.",
+          "technical_feasibility": "A lightweight internal workspace is sufficient for the pilot.",
+          "operational_burden": "Manual coordination and expert review create high ongoing burden.",
+          "dimensions": {
+            "evidence_strength": {"rating": "low", "rationale": "The service format lacks independent willingness-to-pay evidence."},
+            "novelty": {"rating": "low", "rationale": "Concierge delivery is a validation wedge rather than a novel product."},
+            "builder_fit": {"rating": "medium", "rationale": "It is quick to start but adds service work."},
+            "technical_feasibility": {"rating": "high", "rationale": "Little software is required for the first test."},
+            "distribution_clarity": {"rating": "medium", "rationale": "Referrals can reach teams in active deals."},
+            "operational_burden": {"rating": "high", "rationale": "Human coordination dominates delivery."}
+          },
+          "support_status": "speculative"
+        },
+        {
+          "id": "opportunity_answer_api",
+          "target_node_id": null,
+          "title": "Approved-answer integration API",
+          "buyer": "Security engineering lead",
+          "problem": "Existing deal and compliance systems cannot reliably retrieve current approved answers.",
+          "current_spend_or_workaround": "Teams copy answers manually between documents and systems.",
+          "mechanism": "Expose approved answers and provenance through a narrow integration API.",
+          "business_model": "Usage-based API subscription",
+          "why_now": "More questionnaire tools create pressure for an interoperable source of approved answers.",
+          "evidence": [{"claim_id": "$node:claim_repeated_labor", "signal_type": "demand", "independence_key": "publisher:proofgraph-fixtures.invalid", "accepted": true}],
+          "contradiction": {"summary": "Integration trust and incumbent APIs may erase the wedge.", "claim_id": null, "evidence_gap": "No direct evidence that buyers want a standalone API."},
+          "assumptions": [{"id": "assumption_api_demand", "statement": "Teams prefer integration over a complete workspace.", "importance": "high"}],
+          "risks": [{"id": "risk_integration_access", "statement": "Incumbent platforms may restrict useful integration access.", "impact": "high", "mitigation": "Validate two specific integration paths before building broadly."}],
+          "validation_experiment": {"id": "experiment_api_mock", "hypothesis": "Two teams will commit to one approved-answer integration.", "method": "Test a read-only API mock with five security teams.", "metric": "Integration commitments", "success_criteria": "Two written pilot commitments", "timebox": "Two weeks"},
+          "builder_fit": "A read-only API prototype is technically bounded.",
+          "distribution_channel": "Security tooling integration partners",
+          "distribution_rationale": "Partners already reach teams with fragmented security workflows.",
+          "defensibility": "A trusted answer system of record could compound, but the initial API is easy to copy.",
+          "technical_feasibility": "The API is straightforward if answer identity and freshness are modeled carefully.",
+          "operational_burden": "Integration maintenance and access support may grow quickly.",
+          "dimensions": {
+            "evidence_strength": {"rating": "low", "rationale": "Standalone API demand is not independently supported."},
+            "novelty": {"rating": "medium", "rationale": "The source-of-truth wedge differs from a full questionnaire suite."},
+            "builder_fit": {"rating": "medium", "rationale": "The prototype is small but integrations can expand scope."},
+            "technical_feasibility": {"rating": "medium", "rationale": "Core API work is feasible while integrations add uncertainty."},
+            "distribution_clarity": {"rating": "low", "rationale": "Partner willingness remains untested."},
+            "operational_burden": {"rating": "medium", "rationale": "Integration compatibility requires continued maintenance."}
+          },
+          "support_status": "speculative"
+        }
+      ]
+    },
+    "regenerate_opportunity": {
+      "$extends": "canonical_synthesis",
+      "overrides": {"operation": "regenerate_stale"},
+      "take_opportunities": 1,
+      "target_roles": ["target"]
+    },
+    "regenerate_branch_opportunity": {
+      "$extends": "canonical_synthesis",
+      "overrides": {"operation": "regenerate_stale"},
+      "take_opportunities": 1,
+      "target_roles": ["target_opportunity"],
+      "opportunity_overrides": [
+        {
+          "evidence": [
+            {"claim_id": "$node:claim_deal_delay", "signal_type": "labor_cost", "independence_key": "dataset:synthetic-interviews-v1", "accepted": true},
+            {"claim_id": "$node:claim_repeated_labor", "signal_type": "demand", "independence_key": "publisher:proofgraph-fixtures.invalid", "accepted": true},
+            {"claim_id": "claim_workaround_pain", "signal_type": "pain", "independence_key": "dataset:synthetic-interviews-v1", "accepted": true},
+            {"claim_id": "$node:claim_trust_burden", "signal_type": "contradiction", "independence_key": "dataset:synthetic-interviews-v1", "accepted": true}
+          ]
+        }
+      ]
+    }
+  }
+}

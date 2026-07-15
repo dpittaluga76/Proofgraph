@@ -1,0 +1,99 @@
+{
+  "outputs": {
+    "canonical_extract": {
+      "sources": [
+        {
+          "id": "source_synthetic_benchmark",
+          "kind": "web",
+          "url": "https://fixtures.proofgraph.invalid/security-questionnaire-benchmark",
+          "title": "Synthetic security questionnaire workflow benchmark",
+          "retrieved_at": "2026-07-14T12:00:00Z",
+          "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "independence_key": "publisher:proofgraph-fixtures.invalid",
+          "authority": {
+            "domain": "fixtures.proofgraph.invalid",
+            "publisher": "Proofgraph synthetic fixtures",
+            "authoritative": false,
+            "hierarchy_rank": 4
+          },
+          "sanitized_excerpt": "Synthetic teams reported repeated answer lookup and reviewer handoffs across enterprise questionnaires.",
+          "cache_hit": false
+        },
+        {
+          "id": "source_synthetic_interviews",
+          "kind": "user_text",
+          "url": null,
+          "title": "Synthetic buyer interview summary",
+          "retrieved_at": "2026-07-14T12:05:00Z",
+          "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "independence_key": "dataset:synthetic-interviews-v1",
+          "authority": {
+            "domain": null,
+            "publisher": "Proofgraph synthetic fixtures",
+            "authoritative": false,
+            "hierarchy_rank": 5
+          },
+          "sanitized_excerpt": "Synthetic buyers described deal delay, spreadsheet tracking, and a need to keep human approval in the loop.",
+          "cache_hit": false
+        }
+      ],
+      "claims": [
+        {
+          "id": "claim_repeated_labor",
+          "claim": "Security questionnaire response work repeats across enterprise sales cycles.",
+          "classification": "observed",
+          "evidence_type": "workflow_recurrence",
+          "topic_keys": ["security_questionnaire"],
+          "mechanism_tags": ["automate_mandatory_work"],
+          "contradiction_target_key": null,
+          "strength": "strong",
+          "limitations": ["Synthetic fixture evidence"],
+          "source_ids": ["source_synthetic_benchmark", "source_synthetic_interviews"]
+        },
+        {
+          "id": "claim_deal_delay",
+          "claim": "Answer gathering and approval handoffs can delay enterprise deals.",
+          "classification": "observed",
+          "evidence_type": "labor_cost",
+          "topic_keys": ["deal_delay", "security_questionnaire"],
+          "mechanism_tags": ["rebundle_fragmented_workflow"],
+          "contradiction_target_key": null,
+          "strength": "medium",
+          "limitations": ["Synthetic fixture evidence"],
+          "source_ids": ["source_synthetic_interviews"]
+        },
+        {
+          "id": "claim_workaround_pain",
+          "claim": "Teams coordinate questionnaire work through fragile spreadsheet and document handoffs.",
+          "classification": "observed",
+          "evidence_type": "customer_pain",
+          "topic_keys": ["security_questionnaire", "spreadsheet_workaround"],
+          "mechanism_tags": ["replace_critical_spreadsheet"],
+          "contradiction_target_key": null,
+          "strength": "medium",
+          "limitations": ["Synthetic fixture evidence"],
+          "source_ids": ["source_synthetic_interviews"]
+        },
+        {
+          "id": "claim_trust_burden",
+          "claim": "Teams may reject automation that removes human security review.",
+          "classification": "contradicting",
+          "evidence_type": "adoption_risk",
+          "topic_keys": ["security_questionnaire", "trust"],
+          "mechanism_tags": ["reviewer_control"],
+          "contradiction_target_key": "automate_mandatory_work",
+          "strength": "medium",
+          "limitations": ["Synthetic fixture evidence"],
+          "source_ids": ["source_synthetic_interviews"]
+        }
+      ],
+      "candidate_claim_ids": [
+        "claim_deal_delay",
+        "claim_repeated_labor",
+        "claim_trust_burden",
+        "claim_workaround_pain"
+      ],
+      "rejected": []
+    }
+  }
+}
