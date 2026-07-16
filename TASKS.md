@@ -12,7 +12,7 @@ Current phase entry criteria:
 - The local PostgreSQL, backend, frontend, and browser verification gates pass.
 - PG-026 delivers the isolated, resettable, quota-protected anonymous demo locally.
 
-Current implementation task: **PG-027**. The live 20-scenario generation and independent rating run remains an explicit cost-bearing/manual gate after the deterministic harness is implemented.
+Current implementation task: **PG-027**. The 20-scenario Terra generation and blind packet are complete. The automated two-judge implementation and explicit cost-bearing judge run remain before the numerical result can close the task.
 
 ## Pending
 
@@ -38,17 +38,23 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Outcome:** Measure whether orchestration materially beats generic brainstorming.
 
-**Progress (July 15, 2026):** The internal deterministic harness is implemented with 20 versioned
-synthetic scenarios, the four frozen GPT-5.6 structured-output paths, resumable private generation,
-per-scenario blinding, two independent rating templates, exact disagreement adjudication, and
-10,000-resample paired bootstrap reporting. The explicit paid 200-call generation run, two completed
-independent ratings, adjudication of observed disagreements, and the numerical acceptance result
-remain open; therefore PG-027 stays in Pending.
+**Progress (July 15, 2026):** The internal deterministic harness has 20 versioned synthetic
+scenarios, four frozen GPT-5.6-family structured-output paths, an explicit model allowlist, resumable
+six-worker generation, deterministic per-scenario blinding, and 10,000-resample paired bootstrap
+reporting. The Terra run completed all 200 provider stages and produced 80 normalized outputs; its
+blind packet and private variant map are prepared. The approved protocol now replaces manual human
+ratings and adjudication with Vera Crosscheck on Sol and Marco Launch on Luna, arithmetic-mean scores,
+and explicit disagreement telemetry. The judge runner, resumable private checkpoints, validated
+rating artifacts, schema-v2 arithmetic-mean analysis, disagreement reporting, tests, and operator
+documentation are implemented. The paid judge run has 12 of 40 valid durable checkpoints, split as
+7 Vera and 5 Marco; the remaining 28 calls and numerical acceptance result remain open, so PG-027
+stays Pending. Operational state is tracked in `demo-steps.md`.
 
 **Done when:**
 
 - The harness contains at least twenty builder scenarios and compares generic, strategy-only, strategy-plus-evidence, and full-pipeline variants.
-- Variant labels/order are randomized; two independent blinded raters use a fixed five-point rubric for specificity, evidence relevance, novelty, feasibility, economic leverage, testability, and builder fit, with two-point disagreements adjudicated and retained.
+- Variant labels/order are randomized; Vera Crosscheck and Marco Launch independently score every opaque output on the fixed five-point rubric for specificity, evidence relevance, novelty, feasibility, economic leverage, testability, and builder fit.
+- Effective scores are the arithmetic mean of both model judges; absolute two-point disagreements, both original scores, and both rationales are retained and reported without adjudication.
 - Results report each dimension separately with reproducible model/prompt/strategy versions.
 - For evidence relevance, specificity, testability, and builder fit, paired scenario-level results show at least `+0.5` mean points over the generic baseline and a 95% bootstrap confidence-interval lower bound above zero.
 - Evaluation placement decision **DQ-006** determines whether the harness remains internal or ships in the UI.
@@ -120,9 +126,9 @@ remain open; therefore PG-027 stays in Pending.
 
 **Depends on:** None
 
-**Outcome:** The benchmark is a command-line, Git-reviewable workflow for maintainers, two blinded raters, and submission reviewers. It adds no product UI and exposes no variant identities, rater identities, evaluation credentials, or raw provider metadata to anonymous demo visitors. Versioned synthetic scenarios and summarized results may live in the repository; private variant maps remain separate from blind packets and rating templates.
+**Outcome:** The benchmark is a command-line, Git-reviewable workflow for maintainers, two automated blinded model judges, and submission reviewers. It adds no product UI and exposes no variant identities, judge-run metadata, evaluation credentials, or raw provider metadata to anonymous demo visitors. Versioned synthetic scenarios and summarized results may live in the repository; private generation, variant-map, and judge-checkpoint artifacts remain separate from blind inputs and published summaries.
 
-**Done when:** `design.md` section 23.6 and decision DQ-006 record the audience, data exposure, zero product-UI scope, four frozen variants, deterministic artifact split, adjudication semantics, cost-bearing generation boundary, and unchanged numerical acceptance criteria for PG-027.
+**Done when:** `design.md` section 23.6 and decision DQ-006 record the audience, data exposure, zero product-UI scope, four frozen variants, deterministic artifact split, automated-judge mean and disagreement semantics, cost-bearing generation and judging boundaries, and unchanged numerical acceptance criteria for PG-027.
 
 ### PG-026 — Deliver the seeded judge-facing demo experience
 

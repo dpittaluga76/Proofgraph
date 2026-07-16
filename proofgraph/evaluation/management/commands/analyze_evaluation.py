@@ -6,11 +6,10 @@ from django.core.management.base import BaseCommand, CommandParser
 
 from proofgraph.evaluation.artifacts import write_json_atomic, write_text_atomic
 from proofgraph.evaluation.schemas import (
-    AdjudicationArtifact,
     BlindPacket,
     EvaluationGenerationRun,
+    ModelJudgeRatingArtifact,
     PrivateBlindMap,
-    RatingArtifact,
 )
 from proofgraph.evaluation.scoring import analyze_ratings, render_markdown_report
 
@@ -20,15 +19,31 @@ def _load(path: Path, model: type):
 
 
 class Command(BaseCommand):
-    help = "Validate two completed ratings, apply exact adjudications, and score the benchmark."
+    help = (
+        "Validate two automated model-judge artifacts, average their scores, report "
+        "disagreements, and score the benchmark."
+    )
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--packet", type=Path, required=True)
         parser.add_argument("--private-map", type=Path, required=True)
         parser.add_argument("--generation", type=Path, required=True)
-        parser.add_argument("--rater-a", type=Path, required=True)
-        parser.add_argument("--rater-b", type=Path, required=True)
-        parser.add_argument("--adjudications", type=Path, required=True)
+        parser.add_argument(
+            "--judge-a",
+            "--rater-a",
+            dest="judge_a",
+            type=Path,
+            required=True,
+            help="Vera rating artifact; --rater-a is a deprecated compatibility alias.",
+        )
+        parser.add_argument(
+            "--judge-b",
+            "--rater-b",
+            dest="judge_b",
+            type=Path,
+            required=True,
+            help="Marco rating artifact; --rater-b is a deprecated compatibility alias.",
+        )
         parser.add_argument("--output-json", type=Path, required=True)
         parser.add_argument("--output-markdown", type=Path, required=True)
 
@@ -36,15 +51,13 @@ class Command(BaseCommand):
         packet = _load(options["packet"], BlindPacket)
         private_map = _load(options["private_map"], PrivateBlindMap)
         generation = _load(options["generation"], EvaluationGenerationRun)
-        rater_a = _load(options["rater_a"], RatingArtifact)
-        rater_b = _load(options["rater_b"], RatingArtifact)
-        adjudications = _load(options["adjudications"], AdjudicationArtifact)
+        judge_a = _load(options["judge_a"], ModelJudgeRatingArtifact)
+        judge_b = _load(options["judge_b"], ModelJudgeRatingArtifact)
         report = analyze_ratings(
             packet,
             private_map,
-            rater_a,
-            rater_b,
-            adjudications,
+            judge_a,
+            judge_b,
             generation,
         )
         write_json_atomic(options["output_json"], report)

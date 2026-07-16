@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import random
 
 from proofgraph.evaluation.scenarios import scenario_set_hash
@@ -67,6 +68,16 @@ RUBRIC = (
         five="Directly compounds the builder's skills and access while respecting constraints.",
     ),
 )
+
+
+def blind_packet_hash(packet: BlindPacket) -> str:
+    payload = json.dumps(
+        packet.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def prepare_blind_packet(
@@ -143,4 +154,4 @@ def prepare_blind_packet(
     return packet, private_map, rater_a, rater_b
 
 
-__all__ = ["RUBRIC", "RUBRIC_VERSION", "prepare_blind_packet"]
+__all__ = ["RUBRIC", "RUBRIC_VERSION", "blind_packet_hash", "prepare_blind_packet"]

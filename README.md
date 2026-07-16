@@ -2,7 +2,7 @@
 
 An evidence-native canvas for discovering defensible software opportunities.
 
-**Phase 5 is in progress: PG-026's isolated judge-facing demo is complete, and PG-027's deterministic comparative-evaluation harness is implemented.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark now freezes 20 synthetic scenarios, four generation variants, blind packet preparation, two-rater adjudication, and paired bootstrap reporting. The paid generation and independent human-rating run has not been executed, so PG-027's numerical acceptance gate remains open. Observability aggregation, deployment, and submission work also remain. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
+**Phase 5 is in progress: PG-026's isolated judge-facing demo is complete, and PG-027's automated comparative-evaluation harness is implemented.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark freezes 20 synthetic scenarios, four generation variants, resumable concurrent generation, deterministic blinding, two automated model-judge personas, arithmetic-mean scoring, disagreement telemetry, and paired bootstrap reporting. The paid Terra generation and 80-output blind packet are complete; the Sol/Luna judge run has 12 of 40 valid checkpoints, leaving 28 calls and the numerical acceptance result open. Observability aggregation, deployment, and submission work also remain. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
 
 The PostgreSQL schema persists canvases, typed nodes and edges, append-only graph operations, and operation-linked staleness causes. Localized canvas operations provide optimistic semantic, position, and edge versions; idempotent retries; audited constraint anchoring; explicit dependency conflicts; and incremental revision replay. Database constraints and triggers enforce the frozen graph taxonomy, same-canvas references, branch-scoped constraint anchors, actor-scoped idempotency keys, and exact stale/cause consistency.
 
@@ -18,14 +18,14 @@ The generation domain persists idempotent, version-checked runs; immutable stage
 | Phase 2 — Durable jobs | Complete | PostgreSQL queue, fenced worker leases, immutable checkpoints, retry/cancellation, candidate patches, and replayable canvas SSE |
 | Phase 3 — Intelligence pipeline | Complete | Explicit-neighborhood context, structured generation stages, bounded research, evidence clustering, production profiles, and immutable fixtures |
 | Phase 4 — Patch review | Complete and locally verified through PG-025 | Dependency-closed review, transactional apply, evidence rejection, durable staleness, explicit always-parallel regeneration, progress UX, and retained-branch comparison |
-| Phase 5 — Demo hardening and delivery | In progress; PG-026 complete, PG-027 harness ready | Seeded anonymous demo, isolation, reset, quotas, and browser journey delivered; internal 20-scenario generation/blinding/adjudication/bootstrap workflow implemented; paid two-rater result through final submission remains |
+| Phase 5 — Demo hardening and delivery | In progress; PG-026 complete, PG-027 judge run pending | Seeded anonymous demo, isolation, reset, and quotas delivered; Terra generation and blinding complete; automated Sol/Luna judge runner and schema-v2 analysis implemented; paid judging through final submission remains |
 
-`TASKS.md` is the implementation queue. **DQ-006 is resolved**: the benchmark remains an internal command-line workflow with no product-UI scope. **PG-027 is active** until the explicit paid generation, two independent blinded ratings, required adjudications, and numerical acceptance thresholds are complete. “Complete” above means implemented and verified in the local PostgreSQL-backed repository; it does not mean publicly deployed.
+`TASKS.md` is the implementation queue. **DQ-006 is resolved**: the benchmark remains an internal command-line workflow with no product-UI scope. **PG-027 is active** until Vera Crosscheck and Marco Launch complete the explicitly authorized paid blind judging run and the numerical acceptance thresholds are evaluated. “Complete” above means implemented and verified in the local PostgreSQL-backed repository; it does not mean publicly deployed.
 
 ### Current boundaries
 
 - The isolated anonymous demo is implemented and verified locally, but no public environment has been deployed yet.
-- The comparative evaluation harness is implemented and locally testable; its paid generation and independent two-rater result remain tracked by PG-027. Production observability aggregation, public deployment, hackathon packaging, and final demo acceptance remain tracked by PG-028 through PG-031.
+- The comparative evaluation harness and Terra generation/blind packet are complete; the paid automated judge run has 12 of 40 durable checkpoints and remains tracked by PG-027. Production observability aggregation, public deployment, hackathon packaging, and final demo acceptance remain tracked by PG-028 through PG-031.
 - `replay_v1` is a strict canonical-fixture profile, not a general offline model. Inputs that do not match a committed semantic fixture fail explicitly with `fixture_input_mismatch`.
 - `live_v1` and the live stages of `demo_hybrid_v1` require a server-side `OPENAI_API_KEY`. Browser code never receives provider credentials.
 
@@ -35,11 +35,12 @@ The generation domain persists idempotent, version-checked runs; immutable stage
 |---|---|
 | `proofgraph/graph/` | Canvas, node, edge, operation, staleness, lifecycle, and graph telemetry domain |
 | `proofgraph/demo/` | Anonymous session authorization, canonical seed, reset, quotas, cleanup, and demo telemetry |
-| `proofgraph/evaluation/` | Internal structured generation, deterministic blinding, rating validation, adjudication, and paired bootstrap analysis |
+| `proofgraph/evaluation/` | Internal structured generation, deterministic blinding, automated model judging, mean scoring, disagreement telemetry, and paired bootstrap analysis |
 | `proofgraph/generation/` | Run APIs, queue, context packing, providers, research, fixtures, SSE, patch review/application, and generation telemetry |
 | `proofgraph/runtime/` | Health check and generation-worker management commands |
 | `fixtures/security-questionnaires/v1/` | Immutable canonical replay assets and semantic-input commitments |
 | `evaluation/` | Versioned synthetic benchmark scenarios and the private-artifact workflow guide |
+| `demo-steps.md` | Phase 5 operator checklist for automated blind judging, offline analysis, and acceptance |
 | `web/` | Isolated React/Vite workspace, component tests, and Playwright journeys |
 | `tests/` | PostgreSQL-backed unit, integration, replay, concurrency, lifecycle, and phase-flow tests |
 | `design.md` | Architecture and product source of truth |
@@ -132,8 +133,9 @@ Expired-session cleanup claims at most 100 sessions per pass with `FOR UPDATE SK
 
 PG-027 remains an internal benchmark; it adds no application route or browser control. The checked-in
 `evaluation/scenarios.v1.json` contains 20 synthetic builder scenarios with explicit constraints,
-advantages, preferences, and evidence limitations. The harness normalizes all variants to three
-opportunities under one GPT-5.6 model and output budget:
+advantages, preferences, and evidence limitations. The operator must select one of
+`gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`; all four variants use that same selected model,
+medium reasoning effort, and output budget, and normalize to three opportunities:
 
 - `generic`: direct opportunity generation from the builder scenario.
 - `strategy_only`: strategy-catalog planning followed by opportunity generation.
@@ -141,17 +143,29 @@ opportunities under one GPT-5.6 model and output budget:
   opportunity generation.
 - `full_pipeline`: the evidence path followed by one critique-and-revision pass.
 
-`generate_evaluation_variants` is resumable, records private response IDs and token usage, disables
-API storage, and refuses to run without both `OPENAI_API_KEY` and `--confirm-cost`; the complete
-20-scenario run makes 200 provider calls. `prepare_evaluation_packet` then randomizes each scenario's
-output order behind opaque IDs and writes a blind packet, a separately held variant map, two rating
-templates, and an adjudication template. `analyze_evaluation` requires two distinct complete raters,
-requires exact adjudication for every score difference of at least two, retains original scores, and
-reports all seven dimensions plus deterministic 10,000-resample paired scenario-bootstrap intervals.
+`generate_evaluation_variants` uses six bounded concurrent workers by default, is resumable,
+serializes deterministic checkpoint writes, records private response IDs and token usage, disables
+API storage, and refuses bare `gpt-5.6`, unlisted models, or execution without both
+`OPENAI_API_KEY` and `--confirm-cost`; the completed Terra run made 200 provider stages and produced
+80 outputs. `prepare_evaluation_packet` randomized each scenario's output order behind opaque IDs and
+wrote the existing blind packet and separately held private map. Legacy empty human templates remain
+for artifact compatibility but are inactive.
+
+`judge_evaluation_packet` runs Vera Crosscheck on Sol and Marco Launch on Luna with one structured
+call per scenario, independently shuffled opaque output order, medium reasoning, a fixed 3,000-token
+output ceiling, `store=False`, six-worker concurrency, atomic checkpoints, and strict resumability.
+It makes exactly 40 paid calls and materializes two 80-rating artifacts only after completion. The
+judges never receive the private map, generation metadata, peer scores, or variant labels.
+`analyze_evaluation` always takes the arithmetic mean of both judge scores, reports every absolute
+two-point disagreement without adjudication, retains both original scores and rationales, and emits a
+schema-v2 result with all seven dimensions and deterministic 10,000-resample paired
+scenario-bootstrap intervals.
 
 The full workflow, artifact privacy boundaries, and commands are documented in
-[`evaluation/README.md`](evaluation/README.md). Generation and independent human rating have not been
-run in this repository state, so no benchmark result or PG-027 acceptance claim is made yet.
+[`evaluation/README.md`](evaluation/README.md). Terra generation and blind packet preparation are
+complete. The paid automated judge run has 12 of 40 valid checkpoints; 28 calls, artifact
+materialization, and offline analysis remain, so no benchmark result or PG-027 acceptance claim is
+made yet.
 
 ## Current end-to-end workflow
 
@@ -247,7 +261,7 @@ Latest verified Phase 5 repository gate, including the deterministic PG-027 harn
 
 - PostgreSQL migrations, migration-drift detection, and database readiness passed.
 - Ruff formatting and lint passed.
-- All **260 backend tests** passed.
+- All **270 backend tests** passed.
 - Frontend formatting, lint, application/e2e type checking, all **29 unit/component tests**, and the production build passed.
 - All **3 live PostgreSQL-backed Playwright journeys** passed: the anonymous demo seed/reset/retired-canvas path, durable Phase 4 invalidation, and the Phase 1 graph journey.
 - Representative plans use the partial demo active-run index and ordered session-expiry index without sequential scans.
@@ -371,7 +385,7 @@ Set-Location ..
 git diff --check
 ```
 
-The gate currently contains 267 backend tests, 29 frontend component tests, and three Playwright journeys. Phase 5 coverage verifies signed-cookie forgery rejection; exact seed isolation; unique active-canvas ownership; expired bootstrap rotation versus API denial; reset without expiry/quota evasion; reset and cleanup lease fencing; CSRF; cross-session and retired-resource denial; anonymous profile allowlisting; hybrid quotas and circuit breaker; demo query plans; cached-evidence labels; live-versus-replay explanation; bootstrap request coalescing; and the one-click judge journey. PG-027 coverage additionally validates all 20 synthetic scenarios, the frozen 1/2/3/4-stage variants, API-storage disabling, resumable generation, deterministic blinding, private-map separation, complete two-rater scoring, exact disagreement adjudication, paired bootstrap thresholds, and the offline management-command artifact workflow. Tests make no paid provider calls.
+The gate currently contains 275 backend tests, 29 frontend component tests, and three Playwright journeys. Phase 5 coverage verifies signed-cookie forgery rejection; exact seed isolation; unique active-canvas ownership; expired bootstrap rotation versus API denial; reset without expiry/quota evasion; reset and cleanup lease fencing; CSRF; cross-session and retired-resource denial; anonymous profile allowlisting; hybrid quotas and circuit breaker; demo query plans; cached-evidence labels; live-versus-replay explanation; bootstrap request coalescing; and the one-click judge journey. PG-027 coverage additionally validates all 20 synthetic scenarios, the frozen 1/2/3/4-stage variants, API-storage disabling, bounded concurrent generation and judging with serialized deterministic checkpoints, stage-level and judge-call resume, sanitized provider-error recovery, strict structured-output schema compatibility, legacy-artifact compatibility, deterministic blinding, private-map separation, independently shuffled model-judge prompts, complete seven-dimension scoring, arithmetic means for large disagreements, disagreement telemetry, paired bootstrap thresholds, and the offline management-command artifact workflow. Tests make no paid provider calls.
 
 ## Reversible browser setup
 

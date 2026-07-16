@@ -11,7 +11,10 @@ from proofgraph.evaluation.schemas import AdjudicationArtifact, EvaluationGenera
 
 
 class Command(BaseCommand):
-    help = "Create a blind packet, a separate private map, and two empty rating templates."
+    help = (
+        "Create the automated-judge blind packet and separate private map. Legacy empty human "
+        "rating and adjudication templates are retained for artifact compatibility."
+    )
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--scenarios", type=Path, default=DEFAULT_SCENARIO_PATH)
@@ -46,6 +49,7 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f"Prepared {len(private_map.mappings)} blinded outputs in {output_dir}. "
-                "Do not give private-variant-map.json to raters."
+                "Automated judges receive only blind-packet.json; never pass them "
+                "private-variant-map.json, generation metadata, or peer scores."
             )
         )
