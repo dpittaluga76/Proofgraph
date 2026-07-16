@@ -4,8 +4,9 @@ PG-027 is an internal, reproducible command-line benchmark. It compares four fro
 variants over the 20 synthetic scenarios in `scenarios.v1.json`. Generation explicitly selects one
 of `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`; all variants in the run use that same model.
 Bare `gpt-5.6` and every other model ID are rejected. The completed run used Terra and produced 80
-normalized outputs. Its blind packet is prepared. The automated judge run has 12 of 40 valid
-checkpoints and resumes with the remaining 28 calls.
+normalized outputs. Its blind packet, 40-call automated judge run, two 80-rating artifacts, and
+schema-v2 report are complete. The frozen v1 result is FAIL because builder-fit mean lift was
+`+0.350`, below the required `+0.500`; the result must remain unchanged.
 
 The two independent automated judges are:
 
@@ -67,7 +68,7 @@ uv run python manage.py prepare_evaluation_packet `
 Automated judges consume only `blind-packet.json`. They never receive the generation artifact,
 private map, peer scores, variant labels, or provider metadata.
 
-## 3. Run or resume the two automated judges — paid and in progress
+## 3. Run or resume the two automated judges — complete for `eval-terra-v1`
 
 This command makes exactly 40 calls: one scenario-level call per judge for each of 20 scenarios.
 Each response independently scores all four opaque outputs on all seven rubric dimensions. The two
@@ -114,3 +115,18 @@ each improve by at least `+0.5` mean points over generic generation and each pai
 scenario-bootstrap 95% confidence interval has a lower bound above zero. All seven dimensions and
 disagreement counts and rates are reported. Bootstrap analysis remains deterministic at 10,000
 resamples.
+
+## Frozen v1 result
+
+| Required dimension | Mean full − generic | 95% bootstrap CI | Result |
+| --- | ---: | --- | --- |
+| Evidence relevance | `+2.925` | `[2.725, 3.100]` | Pass |
+| Specificity | `+0.950` | `[0.800, 1.100]` | Pass |
+| Testability | `+1.650` | `[1.475, 1.825]` | Pass |
+| Builder fit | `+0.350` | `[0.175, 0.550]` | **Fail** |
+
+The full pipeline received builder-fit `5.0` from both judges, while the generic baseline received
+`4.5` from Vera and `4.8` from Marco. This ceiling, rather than judge disagreement, caused the mean
+threshold failure: only 2 of 560 comparisons had differences of at least two points, and neither was
+builder fit. Preserve `result.json` and `result.md` as the authoritative v1 failure. Any benchmark-v2
+change must be pre-registered before another paid run; do not adjust v1 scores or thresholds.

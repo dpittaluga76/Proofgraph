@@ -6,12 +6,12 @@ done is also satisfied in `TASKS.md`.
 
 ## PG-027 — Automated blinded model evaluation
 
-**Current status (July 15, 2026):** The Terra generation is complete at 200 successful stages and
-80 normalized outputs. The blind packet and private variant map are prepared. The two-judge runner,
-schema-v2 analysis, tests, and documentation are implemented. The paid automated judge run has 12 of
-40 valid checkpoints: 7 from Vera and 5 from Marco. A strict-schema bug and an unsafe model-echoed ID
-were corrected without discarding those checkpoints; rerunning the frozen command requests only the
-remaining 28 calls. The numerical acceptance result remains pending, so PG-027 remains Pending.
+**Current status (July 15, 2026):** The Terra generation, 40-call automated judge run, and offline
+schema-v2 analysis are complete. Three required dimensions passed. Builder fit failed only the mean
+lift threshold: `+0.350` with a positive 95% interval `[0.175, 0.550]`, versus the required `+0.500`.
+Both judges scored the full pipeline `5.0` on builder fit, while the generic baseline was already
+`4.5` from Vera and `4.8` from Marco, creating a five-point-scale ceiling. The authoritative v1 result
+remains **FAIL** and PG-027 remains Pending; scores and thresholds must not be changed retroactively.
 
 **Frozen run:** `evaluation/runs/eval-terra-v1`
 
@@ -32,10 +32,26 @@ are reported, not adjudicated.
 - [x] Implement and test the two-persona, resumable, concurrent judge runner.
 - [x] Implement schema-v2 arithmetic-mean analysis and disagreement reporting.
 - [x] Update `design.md`, `TASKS.md`, `README.md`, and evaluation operator documentation.
-- [ ] Explicitly authorize and complete the 40 paid judge calls.
-- [ ] Generate `result.json` and `result.md`.
-- [ ] Confirm all four required dimensions pass both numerical thresholds.
-- [ ] Copy the non-sensitive result summary into `README.md` and move PG-027 to Done.
+- [x] Explicitly authorize and complete the 40 paid judge calls.
+- [x] Generate `result.json` and `result.md`.
+- [x] Review the frozen v1 acceptance result: FAIL because builder-fit mean lift is `+0.350`.
+- [x] Copy the non-sensitive failed-result summary into repository documentation.
+- [ ] Pre-register and review any benchmark-v2 correction before another paid run.
+- [ ] Obtain a passing frozen result before moving PG-027 to Done.
+
+### Frozen v1 result
+
+| Dimension | Required | Mean full − generic | 95% bootstrap CI | Result |
+| --- | --- | ---: | --- | --- |
+| Evidence relevance | Yes | `+2.925` | `[2.725, 3.100]` | Pass |
+| Specificity | Yes | `+0.950` | `[0.800, 1.100]` | Pass |
+| Testability | Yes | `+1.650` | `[1.475, 1.825]` | Pass |
+| Builder fit | Yes | `+0.350` | `[0.175, 0.550]` | **Fail: mean below +0.500** |
+
+The two judges had only 2 disagreements of at least two points among 560 comparisons (`0.4%`), and
+none were on builder fit. The failure is therefore not judge disagreement. It is a relative-lift
+ceiling: the full pipeline already received the maximum builder-fit score, but generic generation
+also fit builders well because every variant receives the same builder scenario.
 
 ### 1. Set the frozen paths and models
 
@@ -88,9 +104,9 @@ Expected values are `gpt-5.6-terra`, `80`, `20`, and `80`. Keep the following fi
 The existing `rating-rater-a.json`, `rating-rater-b.json`, and `adjudications.json` files are legacy
 compatibility artifacts. Leave them untouched; they are not inputs to the automated workflow.
 
-### 4. Explicitly run or resume the paid judges
+### 4. Explicitly run or resume the paid judges — complete for v1
 
-This is the only remaining paid step. It makes exactly 40 calls: 20 scenarios for Vera and 20 for
+This was the only paid judging step. It makes exactly 40 calls: 20 scenarios for Vera and 20 for
 Marco. Each call scores all four opaque outputs, so the run produces 80 ratings and 560 individual
 dimension scores per judge.
 
@@ -118,7 +134,7 @@ from 1 through 8 is allowed. Worker count is execution-only. Changing a model, p
 prompt, reasoning level, or token budget requires preserving the old artifact and using a new output
 directory.
 
-### 5. Verify the completed judge artifacts
+### 5. Verify the completed judge artifacts — complete for v1
 
 ```powershell
 $JudgeRun = Get-Content "$Run/rating/private-judge-run.json" -Raw | ConvertFrom-Json
@@ -134,7 +150,7 @@ $B.provenance.model
 Expected values are `40`, `80`, `80`, `gpt-5.6-sol`, and `gpt-5.6-luna`. Do not proceed if any
 count or model differs.
 
-### 6. Analyze and unblind offline
+### 6. Analyze and unblind offline — complete for v1
 
 ```powershell
 uv run python manage.py analyze_evaluation `

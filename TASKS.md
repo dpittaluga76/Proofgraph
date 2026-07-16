@@ -46,9 +46,13 @@ blind packet and private variant map are prepared. The approved protocol now rep
 ratings and adjudication with Vera Crosscheck on Sol and Marco Launch on Luna, arithmetic-mean scores,
 and explicit disagreement telemetry. The judge runner, resumable private checkpoints, validated
 rating artifacts, schema-v2 arithmetic-mean analysis, disagreement reporting, tests, and operator
-documentation are implemented. The paid judge run has 12 of 40 valid durable checkpoints, split as
-7 Vera and 5 Marco; the remaining 28 calls and numerical acceptance result remain open, so PG-027
-stays Pending. Operational state is tracked in `demo-steps.md`.
+documentation are implemented. The paid run completed all 40 judge calls and materialized 80 ratings
+per judge. The frozen v1 report passed evidence relevance (`+2.925`), specificity (`+0.950`), and
+testability (`+1.650`), but failed builder fit: its `+0.350` mean lift had a positive `[0.175, 0.550]`
+95% interval but missed the required `+0.500` mean. Both judges gave the full pipeline the maximum
+builder-fit score while the generic baseline was already near the ceiling. The result remains an
+authoritative FAIL; PG-027 stays Pending while any benchmark-v2 correction is pre-registered and
+reviewed before another paid run. Operational state is tracked in `demo-steps.md`.
 
 **Done when:**
 

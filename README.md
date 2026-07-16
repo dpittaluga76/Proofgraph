@@ -2,7 +2,7 @@
 
 An evidence-native canvas for discovering defensible software opportunities.
 
-**Phase 5 is in progress: PG-026's isolated judge-facing demo is complete, and PG-027's automated comparative-evaluation harness is implemented.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark freezes 20 synthetic scenarios, four generation variants, resumable concurrent generation, deterministic blinding, two automated model-judge personas, arithmetic-mean scoring, disagreement telemetry, and paired bootstrap reporting. The paid Terra generation and 80-output blind packet are complete; the Sol/Luna judge run has 12 of 40 valid checkpoints, leaving 28 calls and the numerical acceptance result open. Observability aggregation, deployment, and submission work also remain. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
+**Phase 5 is in progress: PG-026's isolated judge-facing demo is complete, and PG-027 produced an honest failing v1 result.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark freezes 20 synthetic scenarios, four generation variants, resumable concurrent generation, deterministic blinding, two automated model-judge personas, arithmetic-mean scoring, disagreement telemetry, and paired bootstrap reporting. Terra generation, all 40 Sol/Luna judge calls, and offline analysis are complete. Evidence relevance, specificity, and testability passed; builder-fit lift was `+0.350`, below the frozen `+0.500` mean threshold despite a positive confidence interval and maximum full-pipeline scores. PG-027 therefore remains Pending while a benchmark-v2 correction is pre-registered before any new paid run. Observability aggregation, deployment, and submission work also remain. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
 
 The PostgreSQL schema persists canvases, typed nodes and edges, append-only graph operations, and operation-linked staleness causes. Localized canvas operations provide optimistic semantic, position, and edge versions; idempotent retries; audited constraint anchoring; explicit dependency conflicts; and incremental revision replay. Database constraints and triggers enforce the frozen graph taxonomy, same-canvas references, branch-scoped constraint anchors, actor-scoped idempotency keys, and exact stale/cause consistency.
 
@@ -18,14 +18,14 @@ The generation domain persists idempotent, version-checked runs; immutable stage
 | Phase 2 — Durable jobs | Complete | PostgreSQL queue, fenced worker leases, immutable checkpoints, retry/cancellation, candidate patches, and replayable canvas SSE |
 | Phase 3 — Intelligence pipeline | Complete | Explicit-neighborhood context, structured generation stages, bounded research, evidence clustering, production profiles, and immutable fixtures |
 | Phase 4 — Patch review | Complete and locally verified through PG-025 | Dependency-closed review, transactional apply, evidence rejection, durable staleness, explicit always-parallel regeneration, progress UX, and retained-branch comparison |
-| Phase 5 — Demo hardening and delivery | In progress; PG-026 complete, PG-027 judge run pending | Seeded anonymous demo, isolation, reset, and quotas delivered; Terra generation and blinding complete; automated Sol/Luna judge runner and schema-v2 analysis implemented; paid judging through final submission remains |
+| Phase 5 — Demo hardening and delivery | In progress; PG-026 complete, PG-027 v1 failed one gate | Seeded anonymous demo delivered; Terra generation, automated Sol/Luna judging, and schema-v2 analysis complete; builder-fit relative lift missed the frozen mean threshold; benchmark-v2 decision through final submission remains |
 
-`TASKS.md` is the implementation queue. **DQ-006 is resolved**: the benchmark remains an internal command-line workflow with no product-UI scope. **PG-027 is active** until Vera Crosscheck and Marco Launch complete the explicitly authorized paid blind judging run and the numerical acceptance thresholds are evaluated. “Complete” above means implemented and verified in the local PostgreSQL-backed repository; it does not mean publicly deployed.
+`TASKS.md` is the implementation queue. **DQ-006 is resolved**: the benchmark remains an internal command-line workflow with no product-UI scope. **PG-027 is active** because the completed frozen v1 result failed the builder-fit mean-lift threshold. The result is preserved unchanged; any v2 benchmark correction must be specified before another run. “Complete” above means implemented and verified in the local PostgreSQL-backed repository; it does not mean publicly deployed.
 
 ### Current boundaries
 
 - The isolated anonymous demo is implemented and verified locally, but no public environment has been deployed yet.
-- The comparative evaluation harness and Terra generation/blind packet are complete; the paid automated judge run has 12 of 40 durable checkpoints and remains tracked by PG-027. Production observability aggregation, public deployment, hackathon packaging, and final demo acceptance remain tracked by PG-028 through PG-031.
+- The comparative evaluation harness, Terra generation, 40-call automated judging, and offline report are complete. The v1 result failed only builder-fit relative lift and remains tracked by PG-027. Production observability aggregation, public deployment, hackathon packaging, and final demo acceptance remain tracked by PG-028 through PG-031.
 - `replay_v1` is a strict canonical-fixture profile, not a general offline model. Inputs that do not match a committed semantic fixture fail explicitly with `fixture_input_mismatch`.
 - `live_v1` and the live stages of `demo_hybrid_v1` require a server-side `OPENAI_API_KEY`. Browser code never receives provider credentials.
 
@@ -162,10 +162,20 @@ schema-v2 result with all seven dimensions and deterministic 10,000-resample pai
 scenario-bootstrap intervals.
 
 The full workflow, artifact privacy boundaries, and commands are documented in
-[`evaluation/README.md`](evaluation/README.md). Terra generation and blind packet preparation are
-complete. The paid automated judge run has 12 of 40 valid checkpoints; 28 calls, artifact
-materialization, and offline analysis remain, so no benchmark result or PG-027 acceptance claim is
-made yet.
+[`evaluation/README.md`](evaluation/README.md). Terra generation, the 40-call judge run, rating
+materialization, and analysis are complete. The frozen v1 required-dimension result is:
+
+| Dimension | Mean full − generic | 95% bootstrap CI | Result |
+| --- | ---: | --- | --- |
+| Evidence relevance | `+2.925` | `[2.725, 3.100]` | Pass |
+| Specificity | `+0.950` | `[0.800, 1.100]` | Pass |
+| Testability | `+1.650` | `[1.475, 1.825]` | Pass |
+| Builder fit | `+0.350` | `[0.175, 0.550]` | **Fail** |
+
+Both judges scored full-pipeline builder fit at `5.0`, while generic already scored `4.5` and `4.8`,
+leaving insufficient headroom for the frozen `+0.500` relative-lift rule. Only 2 of 560 score
+comparisons had disagreements of at least two points, and neither concerned builder fit. The report
+therefore remains an authoritative FAIL rather than being adjusted after observation.
 
 ## Current end-to-end workflow
 
