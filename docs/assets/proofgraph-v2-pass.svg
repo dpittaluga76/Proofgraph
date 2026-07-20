@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">ProofGraph V2 benchmark pass</title>
+  <desc id="desc">Sanitized aggregate summary: 20 scenarios, 80 complete outputs, zero partials, two judges with 80 ratings each, and all four required dimensions passing the schema 3 comparative acceptance V2 rule.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071525"/>
+      <stop offset="0.58" stop-color="#0b2031"/>
+      <stop offset="1" stop-color="#0c2b35"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#58e6c2"/>
+      <stop offset="1" stop-color="#71c7ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="28" flood-color="#02070d" flood-opacity="0.34"/>
+    </filter>
+    <style>
+      .sans { font-family: Inter, "Segoe UI", Arial, sans-serif; }
+      .muted { fill: #a9bcc9; }
+      .bright { fill: #edf8fb; }
+      .accent { fill: #58e6c2; }
+      .rule { stroke: #294253; stroke-width: 2; }
+      .tabular { font-variant-numeric: tabular-nums; }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#background)"/>
+  <circle cx="1780" cy="-30" r="360" fill="#174a55" opacity="0.24"/>
+  <circle cx="90" cy="1050" r="300" fill="#14395a" opacity="0.19"/>
+
+  <g transform="translate(110 90)" class="sans">
+    <g aria-label="ProofGraph graph mark">
+      <path d="M26 53 L82 22 L140 61 L100 121 L38 111 Z" fill="none" stroke="#58e6c2" stroke-width="8" stroke-linejoin="round"/>
+      <path d="M82 22 L100 121 M26 53 L140 61 M38 111 L140 61" fill="none" stroke="#71c7ff" stroke-width="5" opacity="0.8"/>
+      <circle cx="26" cy="53" r="13" fill="#071525" stroke="#edf8fb" stroke-width="6"/>
+      <circle cx="82" cy="22" r="13" fill="#071525" stroke="#58e6c2" stroke-width="6"/>
+      <circle cx="140" cy="61" r="13" fill="#071525" stroke="#edf8fb" stroke-width="6"/>
+      <circle cx="100" cy="121" r="13" fill="#071525" stroke="#58e6c2" stroke-width="6"/>
+      <circle cx="38" cy="111" r="13" fill="#071525" stroke="#71c7ff" stroke-width="6"/>
+    </g>
+    <text x="185" y="82" class="bright" font-size="58" font-weight="700" letter-spacing="-1">ProofGraph</text>
+    <text x="185" y="125" class="muted" font-size="25" letter-spacing="1.8">EVIDENCE-NATIVE OPPORTUNITY CANVAS</text>
+  </g>
+
+  <g transform="translate(112 270)" class="sans">
+    <text class="muted" font-size="28" font-weight="650" letter-spacing="3">OFFICIAL POST-REGISTRATION BENCHMARK</text>
+    <text y="84" class="bright" font-size="76" font-weight="760" letter-spacing="-2">V2 acceptance result</text>
+    <g transform="translate(0 122)">
+      <rect width="450" height="116" rx="58" fill="url(#accent)"/>
+      <path d="M58 59 l25 25 51-56" fill="none" stroke="#07202a" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="166" y="80" fill="#07202a" font-size="64" font-weight="850" letter-spacing="8">PASS</text>
+    </g>
+    <text y="298" class="muted" font-size="28">Schema 3 · comparative_acceptance_v2</text>
+
+    <g transform="translate(0 352)" filter="url(#shadow)">
+      <rect width="725" height="262" rx="26" fill="#102a3b" stroke="#29495a" stroke-width="2"/>
+      <g transform="translate(34 35)">
+        <g>
+          <text class="accent tabular" font-size="48" font-weight="760">20</text>
+          <text x="88" y="0" class="muted" font-size="23" dominant-baseline="middle">scenarios</text>
+        </g>
+        <g transform="translate(350 0)">
+          <text class="accent tabular" font-size="48" font-weight="760">80</text>
+          <text x="88" y="0" class="muted" font-size="23" dominant-baseline="middle">complete outputs</text>
+        </g>
+        <line x1="0" y1="72" x2="657" y2="72" class="rule"/>
+        <g transform="translate(0 118)">
+          <text class="accent tabular" font-size="48" font-weight="760">0</text>
+          <text x="88" y="0" class="muted" font-size="23" dominant-baseline="middle">partial outputs</text>
+        </g>
+        <g transform="translate(350 118)">
+          <text class="accent tabular" font-size="48" font-weight="760">2 × 80</text>
+          <text x="205" y="0" class="muted" font-size="23" dominant-baseline="middle">judge ratings</text>
+        </g>
+      </g>
+    </g>
+  </g>
+
+  <g transform="translate(915 232)" class="sans" filter="url(#shadow)">
+    <rect width="895" height="680" rx="32" fill="#0e2637" stroke="#29495a" stroke-width="2"/>
+    <g transform="translate(50 54)">
+      <text class="bright" font-size="34" font-weight="720">All required dimensions passed</text>
+      <text x="0" y="47" class="muted" font-size="22">Full-pipeline mean · lift over generic · 95% bootstrap CI</text>
+
+      <g transform="translate(0 100)">
+        <text class="muted" font-size="18" font-weight="650" letter-spacing="1.5">DIMENSION</text>
+        <text x="410" class="muted" font-size="18" font-weight="650" letter-spacing="1.5">MEAN</text>
+        <text x="555" class="muted" font-size="18" font-weight="650" letter-spacing="1.5">LIFT</text>
+        <text x="690" class="muted" font-size="18" font-weight="650" letter-spacing="1.5">INTERVAL</text>
+        <line x1="0" y1="28" x2="795" y2="28" class="rule"/>
+      </g>
+
+      <g transform="translate(0 182)" class="tabular">
+        <g>
+          <circle cx="15" cy="-8" r="15" fill="#58e6c2"/>
+          <path d="M8 -8 l5 6 11-13" fill="none" stroke="#08242e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="48" class="bright" font-size="28">Evidence relevance</text>
+          <text x="410" class="bright" font-size="28" font-weight="700">5.000</text>
+          <text x="555" class="accent" font-size="28" font-weight="700">+2.950</text>
+          <text x="690" class="muted" font-size="23">[2.675, 3.225]</text>
+        </g>
+        <line x1="0" y1="42" x2="795" y2="42" class="rule"/>
+        <g transform="translate(0 100)">
+          <circle cx="15" cy="-8" r="15" fill="#58e6c2"/>
+          <path d="M8 -8 l5 6 11-13" fill="none" stroke="#08242e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="48" class="bright" font-size="28">Specificity</text>
+          <text x="410" class="bright" font-size="28" font-weight="700">5.000</text>
+          <text x="555" class="accent" font-size="28" font-weight="700">+0.825</text>
+          <text x="690" class="muted" font-size="23">[0.675, 0.950]</text>
+        </g>
+        <line x1="0" y1="142" x2="795" y2="142" class="rule"/>
+        <g transform="translate(0 200)">
+          <circle cx="15" cy="-8" r="15" fill="#58e6c2"/>
+          <path d="M8 -8 l5 6 11-13" fill="none" stroke="#08242e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="48" class="bright" font-size="28">Testability</text>
+          <text x="410" class="bright" font-size="28" font-weight="700">5.000</text>
+          <text x="555" class="accent" font-size="28" font-weight="700">+1.450</text>
+          <text x="690" class="muted" font-size="23">[1.250, 1.650]</text>
+        </g>
+        <line x1="0" y1="242" x2="795" y2="242" class="rule"/>
+        <g transform="translate(0 300)">
+          <circle cx="15" cy="-8" r="15" fill="#58e6c2"/>
+          <path d="M8 -8 l5 6 11-13" fill="none" stroke="#08242e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="48" class="bright" font-size="28">Builder fit</text>
+          <text x="410" class="bright" font-size="28" font-weight="700">5.000</text>
+          <text x="555" class="accent" font-size="28" font-weight="700">+0.450</text>
+          <text x="690" class="muted" font-size="23">[0.250, 0.650]</text>
+        </g>
+      </g>
+
+      <rect y="526" width="795" height="2" fill="url(#accent)" opacity="0.75"/>
+      <text y="572" class="muted" font-size="20">Sanitized aggregate summary · no private run artifacts</text>
+    </g>
+  </g>
+
+  <text x="112" y="1010" class="sans muted" font-size="21" letter-spacing="0.7">FROZEN V2 RESULT · JULY 20, 2026</text>
+</svg>

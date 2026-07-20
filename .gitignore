@@ -1,4 +1,6 @@
 .env
+.env.public
+.env.public.test
 .venv/
 __pycache__/
 *.py[cod]
@@ -15,6 +17,9 @@ web/test-results/
 
 # Private/cost-bearing comparative evaluation artifacts
 evaluation/runs/
+
+# Raw hackathon recordings, narration, and intermediate video exports
+.hackathon-video-work/
 
 .DS_Store
 Thumbs.db

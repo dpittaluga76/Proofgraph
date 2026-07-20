@@ -2,7 +2,7 @@
 
 An evidence-native canvas for discovering defensible software opportunities.
 
-**Phase 5 is in progress: the isolated demo, comparative evaluation, and production observability/security hardening are complete through PG-028.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark freezes 20 synthetic scenarios, four generation variants, resumable concurrent generation, deterministic blinding, two automated model-judge personas, arithmetic-mean scoring, disagreement telemetry, and paired bootstrap reporting. The frozen V1 failure remains unchanged. A fresh post-registration V2 run completed 80 Terra outputs and two 80-rating Sol/Luna judge artifacts, then passed all four required schema-v3 acceptance gates. Structured telemetry now feeds aggregate operational views and a correlated four-scenario diagnostic drill; deployment is the active task. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
+**Phase 5 is in progress: the isolated demo, comparative evaluation, and production observability/security hardening are complete through PG-028; the zero-cost PG-029 production stack is implemented and undergoing public-ingress verification.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark freezes 20 synthetic scenarios, four generation variants, resumable concurrent generation, deterministic blinding, two automated model-judge personas, arithmetic-mean scoring, disagreement telemetry, and paired bootstrap reporting. The frozen V1 failure remains unchanged. A fresh post-registration V2 run completed 80 outputs and two 80-rating judge passes, then passed all four required schema-v3 acceptance gates. Structured telemetry now feeds aggregate operational views and a correlated four-scenario diagnostic drill. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client. A Cloudflare named Tunnel supplies stable HTTPS ingress but is not an application runtime component.
 
 The PostgreSQL schema persists canvases, typed nodes and edges, append-only graph operations, and operation-linked staleness causes. Localized canvas operations provide optimistic semantic, position, and edge versions; idempotent retries; audited constraint anchoring; explicit dependency conflicts; and incremental revision replay. Database constraints and triggers enforce the frozen graph taxonomy, same-canvas references, branch-scoped constraint anchors, actor-scoped idempotency keys, and exact stale/cause consistency.
 
@@ -18,13 +18,13 @@ The generation domain persists idempotent, version-checked runs; immutable stage
 | Phase 2 — Durable jobs | Complete | PostgreSQL queue, fenced worker leases, immutable checkpoints, retry/cancellation, candidate patches, and replayable canvas SSE |
 | Phase 3 — Intelligence pipeline | Complete | Explicit-neighborhood context, structured generation stages, bounded research, evidence clustering, production profiles, and immutable fixtures |
 | Phase 4 — Patch review | Complete and locally verified through PG-025 | Dependency-closed review, transactional apply, evidence rejection, durable staleness, explicit always-parallel regeneration, progress UX, and retained-branch comparison |
-| Phase 5 — Demo hardening and delivery | In progress; complete through PG-028, PG-029 active | Seeded anonymous demo delivered; frozen V1 failure preserved; official fresh V2 benchmark passed; correlated observability and security drill complete; deployment, compliance, and final acceptance remain |
+| Phase 5 — Demo hardening and delivery | In progress; PG-029 active | Seeded anonymous demo delivered; frozen V1 failure preserved; official fresh V2 benchmark passed; correlated observability/security drill and local production-container smoke complete; named-tunnel verification, compliance, and final acceptance remain |
 
 `TASKS.md` is the implementation queue. **DQ-006 is resolved**: the benchmark remains an internal command-line workflow with no product-UI scope. **DQ-007 is resolved**: the final product and submission name is **ProofGraph**, while compatibility-sensitive technical identifiers remain lowercase `proofgraph`. **PG-027 is complete** after the fresh V2 benchmark passed its pre-registered schema-v3 rule. “Complete” above means implemented and verified in the local PostgreSQL-backed repository; it does not mean publicly deployed.
 
 ### Current boundaries
 
-- The isolated anonymous demo is implemented and verified locally, but no public environment has been deployed yet.
+- The anonymous demo and three-component production stack are implemented and verified locally. The stable public hostname and post-reboot/public-network evidence are still required before PG-029 can close.
 - The comparative evaluation harness is complete. The V1 result failed only builder-fit relative lift and remains unchanged; the distinct fresh V2 run passed all required dimensions. Private generation, mapping, judge, and detailed result artifacts remain ignored under `evaluation/runs/`; only aggregate results are published. Public deployment, hackathon packaging, and final demo acceptance remain tracked by PG-029 through PG-031.
 - `replay_v1` is a strict canonical-fixture profile, not a general offline model. Inputs that do not match a committed semantic fixture fail explicitly with `fixture_input_mismatch`.
 - `live_v1` and the live stages of `demo_hybrid_v1` require a server-side `OPENAI_API_KEY`. Browser code never receives provider credentials.
@@ -41,6 +41,8 @@ The generation domain persists idempotent, version-checked runs; immutable stage
 | `fixtures/security-questionnaires/v1/` | Immutable canonical replay assets and semantic-input commitments |
 | `evaluation/` | Versioned synthetic benchmark scenarios and the private-artifact workflow guide |
 | `demo-steps.md` | Phase 5 operator checklist for automated blind judging, offline analysis, and acceptance |
+| `docs/hackathon-video-2m45.md` | Exact 2:45 narration, capture, privacy, and export plan |
+| `docs/assets/proofgraph-v2-pass.svg` | Sanitized public V2 aggregate result card; a PNG export is stored beside it |
 | `web/` | Isolated React/Vite workspace, component tests, and Playwright journeys |
 | `tests/` | PostgreSQL-backed unit, integration, replay, concurrency, lifecycle, and phase-flow tests |
 | `design.md` | Architecture and product source of truth |
@@ -110,6 +112,93 @@ uv run python manage.py run_generation_worker --once
 ```
 
 `--once` processes at most one eligible run. Normal workers claim PostgreSQL rows with `FOR UPDATE SKIP LOCKED`, keep a 60-second fenced lease alive every 12 seconds on a dedicated database connection, physically delete expired research/source-content cache rows and bounded batches of expired demo sessions at startup and every 60 seconds, and recycle after 50 jobs or four hours.
+
+## Zero-cost public production stack
+
+ProofGraph does not require Railway or another paid application host. [`compose.public.yaml`](compose.public.yaml)
+runs exactly the three components approved by `design.md` on this Windows PC:
+
+- `web`: the multi-stage [`Dockerfile`](Dockerfile) builds React, installs the frozen Python
+  environment, and runs Django ASGI through Uvicorn. WhiteNoise serves the built client.
+- `worker`: a separate container uses the same locked image and runs `run_generation_worker`. Its
+  `unless-stopped` policy starts a fresh process after the intentional 50-job/four-hour recycle.
+- `db`: PostgreSQL 17 uses a named persistent volume, a health check, a 40-connection ceiling, and
+  no published host port.
+
+Only `web` is published, and only as `127.0.0.1:8000`. A remotely managed Cloudflare **named
+Tunnel** maps the stable public hostname to `http://localhost:8000`; the router and PostgreSQL are
+never opened to the internet. A Quick Tunnel is unsuitable because its URL changes and it does not
+support SSE.
+
+### Prepare the production environment
+
+1. If a Cloudflare credential has appeared in chat, a screenshot, a command transcript, or a log,
+   rotate or delete it before continuing. Do not reuse it or paste its replacement into this file.
+2. Copy [`.env.public.example`](.env.public.example) to the ignored `.env.public` file and replace
+   every placeholder. Use distinct high-entropy values for the PostgreSQL password and Django
+   secret. Put the exact public hostname in `DJANGO_ALLOWED_HOSTS` and its exact `https://` origin
+   in `DJANGO_CSRF_TRUSTED_ORIGINS`.
+3. Keep `OPENAI_API_KEY` empty unless existing provider or hackathon credits explicitly cover the
+   single minimal hybrid check. Replay needs no provider key.
+4. Make the password embedded in `DATABASE_URL` identical to `POSTGRES_PASSWORD`; a URL-safe
+   password avoids accidental URL parsing errors.
+
+```powershell
+Copy-Item .env.public.example .env.public
+notepad .env.public
+
+docker compose -f compose.public.yaml config --quiet
+docker compose -f compose.public.yaml up --detach --build
+docker compose -f compose.public.yaml ps
+```
+
+`web`, `worker`, and `db` must all report `Up`; `web` and `db` must report healthy. Verify the
+loopback origin with the configured public hostname in the Host header:
+
+```powershell
+$hostname = "proofgraph.example.com" # replace with the exact configured hostname
+curl.exe --noproxy "*" --fail --header "Host: $hostname" `
+  --header "X-Forwarded-Proto: https" http://127.0.0.1:8000/api/health
+```
+
+The production response uses secure/SameSite cookies, an exact host/origin allowlist, HSTS,
+content-type, framing, referrer, opener, permissions, and content-security headers. API responses
+are not cacheable; the SSE endpoint retains `no-cache, no-transform` and `X-Accel-Buffering: no`.
+The browser bundle contains no provider credential.
+
+### Configure the named tunnel
+
+1. Install `cloudflared` on Windows and create a remotely managed named tunnel in the Cloudflare
+   dashboard for a domain already active in the account.
+2. In an elevated PowerShell window, install the connector as a Windows service using the newly
+   rotated token shown by the dashboard. Enter it there—not in Codex, Git, `.env.public`, or a
+   screenshot.
+3. Add a public hostname such as `proofgraph.example.com` with service
+   `http://localhost:8000`.
+4. Add a cache-bypass rule for `/api/*`; hashed `/assets/*` files may remain cacheable.
+5. Set Docker Desktop to start at login and disable sleep while connected to AC power. Do not add
+   router forwarding or a PostgreSQL firewall rule.
+
+After DNS and the connector are healthy, replace the placeholder below and re-run the checks from
+an anonymous browser and a separate network:
+
+> **Public demo:** pending named-tunnel hostname and external verification.
+
+```powershell
+$url = "https://proofgraph.example.com" # replace
+curl.exe --fail --silent --show-error --output NUL `
+  --write-out "HTTPS %{http_code}; HTTP/%{http_version}`n" $url
+
+Set-Location web
+$env:PLAYWRIGHT_BASE_URL = $url
+npx playwright test
+Set-Location ..
+```
+
+When `PLAYWRIGHT_BASE_URL` is set, Playwright targets that deployed origin and does not launch the
+local Uvicorn or Vite development servers. Clear the variable to restore the local test behavior.
+Stop the public stack with `docker compose -f compose.public.yaml down`; omit `--volumes` so the
+PostgreSQL data survives.
 
 ## Production observability and security verification
 
@@ -230,6 +319,8 @@ The official fresh post-registration V2 result is schema 3, identifies
 | Testability | `5.000` | `+1.450` | `[1.250, 1.650]` | Pass |
 | Builder fit | `5.000` | `+0.450` | `[0.250, 0.650]` | Pass |
 
+![Sanitized ProofGraph V2 benchmark PASS summary](docs/assets/proofgraph-v2-pass.png)
+
 Terra produced 80 complete outputs with no partials; Vera Crosscheck on Sol and Marco Launch on Luna
 each produced 80 ratings. Only one of 560 score comparisons differed by at least two points. The
 earlier V1-artifact V2 reanalysis remains diagnostic only and does not replace either official result.
@@ -237,7 +328,27 @@ earlier V1-artifact V2 reanalysis remains diagnostic only and does not replace e
 The completed V2 workflow is automated by [`scripts/run-evaluation-v2.ps1`](scripts/run-evaluation-v2.ps1)
 and documented in [`demo-steps-v2.md`](demo-steps-v2.md). Its paid stages require explicit cost
 confirmation, its dry-run mode creates no artifacts or provider calls, and the completed private run
-remains ignored under `evaluation/runs/eval-terra-v2/`.
+remains in an ignored local-only evaluation output directory.
+
+## Hackathon build transparency
+
+ProofGraph targets the **Work & Productivity** category. Codex was used as the primary engineering
+environment to translate `design.md` into migrations, domain services, security boundaries, fixture
+repair, tests, production containers, and delivery checks. The majority-build task is **Continue
+PG-003**; its required `/feedback` Session ID is still pending and must be inserted here only after
+the user runs `/feedback` in that task near submission time.
+
+GPT-5.6 is used in two deliberately separate ways. In the product’s judge-facing
+`demo_hybrid_v1` profile, deterministic planning/evidence stages feed live GPT-5.6 synthesis,
+critique, and patch construction. The internal comparative benchmark also used approved GPT-5.6
+model deployments for generation and two blinded judge personas. The deterministic `replay_v1`
+fallback makes no provider call and never silently replaces a requested live profile.
+
+Known limitations are explicit: the zero-cost public deployment is available only while this PC,
+Docker Desktop, and its internet connection remain healthy; live hybrid verification depends on
+existing credits and server-side credentials; replay accepts only the canonical committed semantic
+journey; retained source content is derived and excerpt-bounded rather than a full document store;
+and the product supports opportunity discovery, not autonomous legal or security review.
 
 ## Current end-to-end workflow
 
@@ -329,13 +440,17 @@ ProofGraph follows the DQ-003 derived-evidence-only policy. It never persists co
 
 ## Checks
 
-Latest verified Phase 5 repository gate, including the deterministic PG-027 harness, on July 15, 2026:
+Latest verified Phase 5 repository gate, including the deterministic replay repair and production
+container smoke, on July 20, 2026:
 
 - PostgreSQL migrations, migration-drift detection, and database readiness passed.
 - Ruff formatting and lint passed.
-- All **270 backend tests** passed.
-- Frontend formatting, lint, application/e2e type checking, all **29 unit/component tests**, and the production build passed.
+- All **285 backend tests** passed.
+- Frontend formatting, lint, application/e2e type checking, all **30 unit/component tests**, and the production build passed.
 - All **3 live PostgreSQL-backed Playwright journeys** passed: the anonymous demo seed/reset/retired-canvas path, durable Phase 4 invalidation, and the Phase 1 graph journey.
+- The production image and three-service Compose stack built; PostgreSQL and the web origin became
+  healthy; React/static and API responses passed the loopback smoke; and production-browser replay,
+  transactional patch apply, and reset passed without a provider call.
 - Representative plans use the partial demo active-run index and ordered session-expiry index without sequential scans.
 
 PG-027 closure was verified on July 20, 2026: all 17 focused evaluation tests passed; the official
@@ -462,7 +577,7 @@ Set-Location ..
 git diff --check
 ```
 
-The gate currently contains 275 backend tests, 29 frontend component tests, and three Playwright journeys. Phase 5 coverage verifies signed-cookie forgery rejection; exact seed isolation; unique active-canvas ownership; expired bootstrap rotation versus API denial; reset without expiry/quota evasion; reset and cleanup lease fencing; CSRF; cross-session and retired-resource denial; anonymous profile allowlisting; hybrid quotas and circuit breaker; demo query plans; cached-evidence labels; live-versus-replay explanation; bootstrap request coalescing; and the one-click judge journey. PG-027 coverage additionally validates all 20 synthetic scenarios, the frozen 1/2/3/4-stage variants, API-storage disabling, bounded concurrent generation and judging with serialized deterministic checkpoints, stage-level and judge-call resume, sanitized provider-error recovery, strict structured-output schema compatibility, legacy-artifact compatibility, deterministic blinding, private-map separation, independently shuffled model-judge prompts, complete seven-dimension scoring, arithmetic means for large disagreements, disagreement telemetry, paired bootstrap thresholds, and the offline management-command artifact workflow. Tests make no paid provider calls.
+The gate currently contains 285 backend tests, 30 frontend component tests, and three Playwright journeys. Phase 5 coverage verifies signed-cookie forgery rejection; exact seed isolation; unique active-canvas ownership; expired bootstrap rotation versus API denial; reset without expiry/quota evasion; reset and cleanup lease fencing; CSRF; cross-session and retired-resource denial; anonymous profile allowlisting; hybrid quotas and circuit breaker; demo query plans; cached-evidence labels; live-versus-replay explanation; bootstrap request coalescing; and the one-click judge journey. PG-027 coverage additionally validates all 20 synthetic scenarios, the frozen 1/2/3/4-stage variants, API-storage disabling, bounded concurrent generation and judging with serialized deterministic checkpoints, stage-level and judge-call resume, sanitized provider-error recovery, strict structured-output schema compatibility, legacy-artifact compatibility, deterministic blinding, private-map separation, independently shuffled model-judge prompts, complete seven-dimension scoring, arithmetic means for large disagreements, disagreement telemetry, paired bootstrap thresholds, and the offline management-command artifact workflow. Tests make no paid provider calls.
 
 ## Reversible browser setup
 

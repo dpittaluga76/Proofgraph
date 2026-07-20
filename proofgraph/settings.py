@@ -60,16 +60,47 @@ DEMO_SESSION_CONCURRENT_RUN_LIMIT = 2
 DEMO_GLOBAL_HYBRID_RUN_LIMIT = 120
 DEMO_CLEANUP_BATCH_SIZE = 100
 
+WEB_DIST_DIR = BASE_DIR / "web" / "dist"
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "proofgraph.runtime.middleware.PublicSecurityHeadersMiddleware",
 ]
+if WEB_DIST_DIR.is_dir():
+    # Keep the static responder inside the response-hardening middleware so the
+    # built client receives the same browser security policy as API responses.
+    MIDDLEWARE.append("whitenoise.middleware.WhiteNoiseMiddleware")
+elif not DEBUG:
+    raise ImproperlyConfigured(
+        "The production React build is missing. Run `npm run build` in web/ first."
+    )
 
 ROOT_URLCONF = "proofgraph.urls"
 ASGI_APPLICATION = "proofgraph.asgi.application"
 
 DATABASES = {"default": database_config(os.environ)}
+
+# Cloudflare terminates HTTPS and reaches the origin over the loopback-only HTTP
+# binding declared in compose.public.yaml. That makes the forwarded scheme safe to
+# trust while keeping the origin itself unavailable from the public network.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SAMESITE = "Lax"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+X_FRAME_OPTIONS = "DENY"
+SECURE_HSTS_SECONDS = 0 if DEBUG else 86_400
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
+
+WHITENOISE_ROOT = WEB_DIST_DIR
+WHITENOISE_INDEX_FILE = True
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"

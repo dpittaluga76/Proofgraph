@@ -19,6 +19,13 @@ def test_health_reports_postgresql_ready() -> None:
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "database": "ok", "demo_mode": False}
     assert "csrftoken" in response.cookies
+    assert response["Cache-Control"] == "no-store"
+    assert response["Content-Security-Policy"].startswith("default-src 'self';")
+    assert response["Permissions-Policy"] == (
+        "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+    )
+    assert response["X-Content-Type-Options"] == "nosniff"
+    assert response["X-Frame-Options"] == "DENY"
 
 
 @pytest.mark.django_db
