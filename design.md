@@ -1927,12 +1927,21 @@ Score:
 
 ### 23.5 MVP success criterion
 
-For each required dimension, calculate the paired scenario-level difference between the full pipeline and generic baseline after averaging the two automated judge scores. The full pipeline passes only when its mean improvement is at least `0.5` points on the five-point scale and the lower bound of a scenario-level 95% bootstrap confidence interval is greater than zero for each of:
+For each required dimension, calculate the paired scenario-level difference between the full pipeline and generic baseline after averaging the two automated judge scores. Acceptance rules are versioned and written into every result produced after v1. The frozen `comparative_acceptance_v1` rule remains reproducible and unchanged: all four required dimensions pass only when their mean improvement is at least `0.5` points on the five-point scale and the lower bound of a scenario-level 95% bootstrap confidence interval is greater than zero.
+
+The pre-registered `comparative_acceptance_v2` rule corrects the builder-fit ceiling observed in the frozen v1 run without changing its scores or verdict:
+
+- Evidence relevance, specificity, and testability retain the v1 rule: mean full-pipeline improvement of at least `0.5` and paired-bootstrap 95% confidence-interval lower bound greater than zero.
+- Builder fit becomes an absolute-quality guardrail plus a no-regression check: the full-pipeline builder-fit mean must be at least `4.5` out of `5`, and the paired full-minus-generic bootstrap 95% confidence-interval lower bound must be at least zero.
+
+The required dimensions remain:
 
 - Evidence relevance
 - Specificity
 - Testability
 - Builder fit
+
+This V2 treatment is narrow because every variant receives the same builder scenario and normalized output schema. A capable generic response can therefore respect builder constraints even without the evidence and critique stages, leaving insufficient five-point-scale headroom for a meaningful `+0.5` relative-lift requirement. V2 still requires excellent full-pipeline builder fit and rejects evidence that the pipeline performs worse than generic generation.
 
 ### 23.6 Evaluation placement and reproducibility
 
@@ -1951,7 +1960,11 @@ Before a paid run begins, the operator must explicitly select exactly one of `gp
 
 The frozen automated-judge personas are `vera_crosscheck_v1`, an evidence auditor normally paired with `gpt-5.6-sol`, and `marco_launch_v1`, a bootstrap operator normally paired with `gpt-5.6-luna`. Both use medium reasoning, a 3,000-output-token budget, API storage disabled, the same versioned common mission and rubric, and no tools. The judge command requires explicit allowed model IDs, cost confirmation, a judge seed, and the blind packet; it schedules forty cost-bearing calls with six workers by default and an operator-selectable range of one through eight. Judge and persona configuration, prompt version, packet hash, response IDs, token usage, deterministic work order, and completed scenario judgments are atomically checkpointed in a private artifact. Worker count is execution-only; changing a judge model, persona, prompt, seed, response budget, packet, or reasoning effort requires a new private judge-run artifact. Provider failures retain completed judgments and use the same sanitized recovery boundary as generation. Packet preparation, arithmetic-mean scoring, disagreement reporting, bootstrap confidence intervals, and report rendering are deterministic offline steps.
 
-The result artifact reports every dimension, scenario-level full-versus-generic paired differences, mean improvements, deterministic 95% scenario-bootstrap intervals, generation and judge provenance, both original scores and rationales, arithmetic-mean effective scores, and disagreement counts and rates overall and per dimension. PG-027 is complete only after two independent automated blinded rating artifacts cover all outputs and all four required dimensions meet section 23.5. Summary results may be copied into repository documentation, but no private evaluation data or controls are added to the public application.
+The result artifact reports every dimension, scenario-level full-versus-generic paired differences, mean improvements, deterministic 95% scenario-bootstrap intervals, generation and judge provenance, both original scores and rationales, arithmetic-mean effective scores, and disagreement counts and rates overall and per dimension. A V2 result additionally records `comparative_acceptance_v2`, every full-pipeline dimension mean, and the exact per-dimension acceptance criteria in schema v3. The analysis command defaults to the frozen V1 rule for backward compatibility and requires explicit V2 selection; it must never overwrite the authoritative V1 result paths.
+
+The frozen V1 result remains an authoritative failure. An official V2 result requires a distinct generation artifact, blind packet, judge run, generation seed, judge seed, and output directory created only after this V2 rule is committed. Locally reanalyzing V1 ratings under V2 may be used to verify code behavior but may not be presented as a V2 benchmark result. PG-027 is complete only after two independent automated blinded V2 rating artifacts cover all outputs and all four required dimensions meet the V2 rule in section 23.5. Summary results may be copied into repository documentation, but no private evaluation data or controls are added to the public application.
+
+The checked-in V2 operator runner is a PowerShell orchestration layer over the four management commands; it does not duplicate generation, blinding, judging, or scoring logic. It defaults to a new ignored V2 run directory, supports dry-run and individual-stage execution, and writes a run manifest that freezes the scenario path, generation model, judge models, and three semantic seeds before any paid call. Resuming with different frozen settings or targeting the V1 run directory is rejected. Generation and judging remain separately protected by an explicit cost-confirmation switch, while preparation and analysis remain offline.
 
 ---
 
@@ -2558,6 +2571,13 @@ These do not block the architecture, but must be resolved before the dependent i
 - DQ-002 keeps rejected evidence visible by default with accessible muted presentation while preserving its fixed exclusion and invalidation semantics.
 - DQ-004 selects always-parallel stale regeneration: fresh successor identities, explicit old-to-new lineage, cloned branch constraints, and no old-node cause clearing.
 - Replacement regeneration is outside the MVP; regeneration declarations remain immutable workset fences and audit data.
+
+### v10
+
+- Comparative-evaluation acceptance is explicitly versioned so the frozen V1 failure remains reproducible.
+- V2 retains the `+0.5` positive-lift rule for evidence relevance, specificity, and testability, while builder fit uses a `4.5/5` full-pipeline floor plus a non-negative paired confidence-interval lower bound to correct the observed five-point-scale ceiling.
+- Official V2 acceptance requires fresh generation and judge artifacts created after pre-registration; local V1 reanalysis is diagnostic only.
+- The V2 PowerShell runner preserves management-command boundaries, freezes semantic run settings in an ignored manifest, supports dry-run and stage resume, and cannot bypass paid-call confirmation.
 
 ---
 

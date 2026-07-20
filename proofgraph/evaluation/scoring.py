@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 from statistics import mean
-from typing import Any
+from typing import Any, Literal
 
 from proofgraph.evaluation.blinding import blind_packet_hash
 from proofgraph.evaluation.schemas import (
@@ -21,6 +21,13 @@ from proofgraph.evaluation.schemas import (
 BOOTSTRAP_RESAMPLES = 10_000
 BOOTSTRAP_SEED = 27_031
 DISAGREEMENT_THRESHOLD = 2
+AcceptanceRuleVersion = Literal["v1", "v2"]
+ACCEPTANCE_RULE_VERSIONS: tuple[AcceptanceRuleVersion, ...] = ("v1", "v2")
+ACCEPTANCE_RULE_IDS: dict[AcceptanceRuleVersion, str] = {
+    "v1": "comparative_acceptance_v1",
+    "v2": "comparative_acceptance_v2",
+}
+V2_BUILDER_FIT_MINIMUM = 4.5
 
 _EXPECTED_PERSONAS = {
     "vera_crosscheck": "vera_crosscheck_v1",
@@ -164,7 +171,11 @@ def analyze_ratings(
     judge_a: ModelJudgeRatingArtifact,
     judge_b: ModelJudgeRatingArtifact,
     generation_run: EvaluationGenerationRun,
+    *,
+    acceptance_rule: AcceptanceRuleVersion = "v1",
 ) -> dict[str, Any]:
+    if acceptance_rule not in ACCEPTANCE_RULE_VERSIONS:
+        raise ValueError(f"acceptance_rule must be one of: {', '.join(ACCEPTANCE_RULE_VERSIONS)}.")
     if private_map.generation_run_id != generation_run.run_id:
         raise ValueError("Private map generation run ID does not match the generation artifact.")
     mapping, packet_output_ids = _validate_mapping(packet, private_map)
@@ -192,11 +203,32 @@ def analyze_ratings(
         ]
         lower, upper = bootstrap_interval(differences, seed=BOOTSTRAP_SEED + index)
         improvement = mean(differences)
+        full_pipeline_mean = mean(
+            effective[(scenario_id, "full_pipeline", dimension)] for scenario_id in scenario_ids
+        )
         required = dimension in REQUIRED_DIMENSIONS
-        passed = improvement >= 0.5 and lower > 0 if required else None
+        acceptance_criteria: dict[str, Any] | None = None
+        if required and acceptance_rule == "v2" and dimension == "builder_fit":
+            passed = full_pipeline_mean >= V2_BUILDER_FIT_MINIMUM and lower >= 0
+            acceptance_criteria = {
+                "kind": "absolute_floor_and_nonnegative_relative_ci",
+                "minimum_full_pipeline_mean": V2_BUILDER_FIT_MINIMUM,
+                "minimum_bootstrap_95_ci_lower_bound": 0.0,
+                "ci_lower_bound_inclusive": True,
+            }
+        elif required:
+            passed = improvement >= 0.5 and lower > 0
+            acceptance_criteria = {
+                "kind": "minimum_relative_lift_and_positive_ci",
+                "minimum_mean_full_minus_generic": 0.5,
+                "minimum_bootstrap_95_ci_lower_bound": 0.0,
+                "ci_lower_bound_inclusive": False,
+            }
+        else:
+            passed = None
         if required and not passed:
             all_required_pass = False
-        dimensions[dimension] = {
+        dimension_report = {
             "required": required,
             "mean_full_minus_generic": improvement,
             "bootstrap_seed": BOOTSTRAP_SEED + index,
@@ -204,6 +236,10 @@ def analyze_ratings(
             "passes_required_threshold": passed,
             "scenario_differences": dict(zip(scenario_ids, differences, strict=True)),
         }
+        if acceptance_rule == "v2":
+            dimension_report["full_pipeline_mean"] = full_pipeline_mean
+            dimension_report["acceptance_criteria"] = acceptance_criteria
+        dimensions[dimension] = dimension_report
 
     effective_scores = {
         scenario_id: {
@@ -215,7 +251,12 @@ def analyze_ratings(
         for scenario_id in scenario_ids
     }
     return {
-        "schema_version": 2,
+        "schema_version": 3 if acceptance_rule == "v2" else 2,
+        **(
+            {"acceptance_rule_version": ACCEPTANCE_RULE_IDS[acceptance_rule]}
+            if acceptance_rule == "v2"
+            else {}
+        ),
         "packet_id": packet.packet_id,
         "generation": {
             "run_id": generation_run.run_id,
@@ -253,25 +294,71 @@ def analyze_ratings(
 
 def render_markdown_report(report: dict[str, Any]) -> str:
     status = "PASS" if report["acceptance_passed"] else "FAIL"
+    is_v2 = report.get("acceptance_rule_version") == ACCEPTANCE_RULE_IDS["v2"]
     lines = [
         "# Proofgraph automated blinded model evaluation",
         "",
         f"Overall required-dimension result: **{status}**",
         "",
-        "Every effective score is the arithmetic mean of the two automated judges. Large "
-        "disagreements are reported and are not adjudicated.",
-        "",
-        "| Dimension | Required | Mean full - generic | 95% bootstrap CI | Pass |",
-        "| --- | --- | ---: | --- | --- |",
     ]
+    if is_v2:
+        lines.extend(
+            [
+                f"Acceptance rule: `{ACCEPTANCE_RULE_IDS['v2']}`.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "Every effective score is the arithmetic mean of the two automated judges. Large "
+            "disagreements are reported and are not adjudicated.",
+            "",
+        ]
+    )
+    if is_v2:
+        lines.extend(
+            [
+                "| Dimension | Required | Full mean | Mean full - generic | "
+                "95% bootstrap CI | Pass |",
+                "| --- | --- | ---: | ---: | --- | --- |",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "| Dimension | Required | Mean full - generic | 95% bootstrap CI | Pass |",
+                "| --- | --- | ---: | --- | --- |",
+            ]
+        )
     for dimension in DIMENSIONS:
         item = report["dimensions"][dimension]
         lower, upper = item["bootstrap_95_ci"]
         passed = item["passes_required_threshold"]
-        lines.append(
-            f"| {dimension} | {'yes' if item['required'] else 'no'} | "
-            f"{item['mean_full_minus_generic']:.3f} | [{lower:.3f}, {upper:.3f}] | "
-            f"{'yes' if passed else 'no' if passed is False else 'n/a'} |"
+        if is_v2:
+            lines.append(
+                f"| {dimension} | {'yes' if item['required'] else 'no'} | "
+                f"{item['full_pipeline_mean']:.3f} | "
+                f"{item['mean_full_minus_generic']:.3f} | [{lower:.3f}, {upper:.3f}] | "
+                f"{'yes' if passed else 'no' if passed is False else 'n/a'} |"
+            )
+        else:
+            lines.append(
+                f"| {dimension} | {'yes' if item['required'] else 'no'} | "
+                f"{item['mean_full_minus_generic']:.3f} | [{lower:.3f}, {upper:.3f}] | "
+                f"{'yes' if passed else 'no' if passed is False else 'n/a'} |"
+            )
+
+    if is_v2:
+        lines.extend(
+            [
+                "",
+                "## Required-dimension rules",
+                "",
+                "- Evidence relevance, specificity, and testability: mean lift at least "
+                "`+0.500` and bootstrap lower bound greater than `0`.",
+                "- Builder fit: full-pipeline mean at least `4.500` and paired bootstrap "
+                "lower bound at least `0`.",
+            ]
         )
 
     lines.extend(["", "## Automated judges", ""])
@@ -316,11 +403,29 @@ def render_markdown_report(report: dict[str, Any]) -> str:
             f"- Judge run: `{report['judges'][0]['judge_run_id']}`",
             f"- Judge prompt version: `{report['judges'][0]['prompt_version']}`",
             "",
-            "The JSON report is authoritative and retains scenario differences, both original "
-            "scores and rationales, effective arithmetic means, and disagreement metrics.",
         ]
     )
+    if is_v2:
+        lines.append(
+            "The JSON report retains scenario differences, both original scores and rationales, "
+            "effective arithmetic means, and disagreement metrics. A V2 analysis is authoritative "
+            "only when it uses fresh post-registration V2 generation and judge artifacts; "
+            "reanalyzed V1 ratings remain diagnostic."
+        )
+    else:
+        lines.append(
+            "The JSON report is authoritative and retains scenario differences, both original "
+            "scores and rationales, effective arithmetic means, and disagreement metrics."
+        )
     return "\n".join(lines) + "\n"
 
 
-__all__ = ["analyze_ratings", "bootstrap_interval", "render_markdown_report"]
+__all__ = [
+    "ACCEPTANCE_RULE_IDS",
+    "ACCEPTANCE_RULE_VERSIONS",
+    "V2_BUILDER_FIT_MINIMUM",
+    "AcceptanceRuleVersion",
+    "analyze_ratings",
+    "bootstrap_interval",
+    "render_markdown_report",
+]

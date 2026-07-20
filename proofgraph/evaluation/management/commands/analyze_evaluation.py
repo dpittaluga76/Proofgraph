@@ -11,7 +11,12 @@ from proofgraph.evaluation.schemas import (
     ModelJudgeRatingArtifact,
     PrivateBlindMap,
 )
-from proofgraph.evaluation.scoring import analyze_ratings, render_markdown_report
+from proofgraph.evaluation.scoring import (
+    ACCEPTANCE_RULE_IDS,
+    ACCEPTANCE_RULE_VERSIONS,
+    analyze_ratings,
+    render_markdown_report,
+)
 
 
 def _load(path: Path, model: type):
@@ -46,6 +51,15 @@ class Command(BaseCommand):
         )
         parser.add_argument("--output-json", type=Path, required=True)
         parser.add_argument("--output-markdown", type=Path, required=True)
+        parser.add_argument(
+            "--acceptance-rule",
+            choices=ACCEPTANCE_RULE_VERSIONS,
+            default="v1",
+            help=(
+                "Acceptance protocol to apply. Defaults to frozen v1; select v2 explicitly "
+                "for the pre-registered builder-fit ceiling correction."
+            ),
+        )
 
     def handle(self, *args: object, **options: object) -> None:
         packet = _load(options["packet"], BlindPacket)
@@ -59,8 +73,19 @@ class Command(BaseCommand):
             judge_a,
             judge_b,
             generation,
+            acceptance_rule=options["acceptance_rule"],
         )
         write_json_atomic(options["output_json"], report)
         write_text_atomic(options["output_markdown"], render_markdown_report(report))
         status = "PASS" if report["acceptance_passed"] else "FAIL"
         self.stdout.write(self.style.SUCCESS(f"Evaluation result: {status}"))
+        self.stdout.write(f"Acceptance rule: {ACCEPTANCE_RULE_IDS[options['acceptance_rule']]}")
+        if not report["acceptance_passed"]:
+            failed_dimensions = [
+                dimension
+                for dimension, item in report["dimensions"].items()
+                if item["required"] and item["passes_required_threshold"] is False
+            ]
+            self.stdout.write(
+                self.style.WARNING(f"Failed required dimensions: {', '.join(failed_dimensions)}")
+            )

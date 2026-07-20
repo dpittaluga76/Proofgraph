@@ -12,6 +12,10 @@ lift threshold: `+0.350` with a positive 95% interval `[0.175, 0.550]`, versus t
 Both judges scored the full pipeline `5.0` on builder fit, while the generic baseline was already
 `4.5` from Vera and `4.8` from Marco, creating a five-point-scale ceiling. The authoritative v1 result
 remains **FAIL** and PG-027 remains Pending; scores and thresholds must not be changed retroactively.
+The V2 acceptance correction is pre-registered and implemented locally. It keeps the V1 relative
+rule for evidence relevance, specificity, and testability, while builder fit requires a full-pipeline
+mean of at least `4.500` and a non-negative paired confidence-interval lower bound. No fresh paid V2
+run has been authorized.
 
 **Frozen run:** `evaluation/runs/eval-terra-v1`
 
@@ -36,7 +40,11 @@ are reported, not adjudicated.
 - [x] Generate `result.json` and `result.md`.
 - [x] Review the frozen v1 acceptance result: FAIL because builder-fit mean lift is `+0.350`.
 - [x] Copy the non-sensitive failed-result summary into repository documentation.
-- [ ] Pre-register and review any benchmark-v2 correction before another paid run.
+- [x] Pre-register and review the benchmark-V2 correction before another paid run.
+- [x] Implement explicit local V1/V2 analysis, schema-v3 V2 reporting, and focused tests.
+- [x] Verify the local evaluation test suite without making provider calls.
+- [x] Reanalyze V1 artifacts under V2 as a local diagnostic only: schema-v3 PASS, not official V2.
+- [x] Add and dry-run the guarded fresh V2 script documented in `demo-steps-v2.md`.
 - [ ] Obtain a passing frozen result before moving PG-027 to Done.
 
 ### Frozen v1 result
@@ -177,7 +185,7 @@ $Result.disagreements | ConvertTo-Json -Depth 8
 $Result.dimensions | ConvertTo-Json -Depth 8
 ```
 
-### 7. Apply the frozen acceptance rule
+### 7. Apply the frozen V1 acceptance rule
 
 `acceptance_passed` is true only when every required dimension independently meets both conditions:
 
@@ -197,12 +205,46 @@ summary into `README.md`, record every version, and move PG-027 to Done in `TASK
 keep PG-027 Pending, preserve the complete failed run unchanged, diagnose scenario differences, and
 version any later benchmark or pipeline change before starting a new run.
 
+### 8. Verify the pre-registered V2 rule locally
+
+V2 keeps the V1 `+0.500` mean-lift and positive confidence-interval rule for evidence relevance,
+specificity, and testability. Builder fit instead requires:
+
+| Required dimension | Full-pipeline mean | Paired 95% bootstrap CI lower bound |
+| --- | ---: | ---: |
+| Builder fit | At least `4.500` | At least `0` |
+
+The analysis command defaults to V1. Select V2 explicitly and write to diagnostic paths when using
+the frozen V1 ratings for local code verification:
+
+```powershell
+uv run python manage.py analyze_evaluation `
+  --packet "$Run/rating/blind-packet.json" `
+  --private-map "$Run/rating/private-variant-map.json" `
+  --generation "$Run/private-generation.json" `
+  --judge-a "$Run/rating/rating-judge-a.json" `
+  --judge-b "$Run/rating/rating-judge-b.json" `
+  --acceptance-rule v2 `
+  --output-json "$Run/diagnostic-v2.json" `
+  --output-markdown "$Run/diagnostic-v2.md"
+```
+
+This diagnostic may prove that the implementation applies V2 correctly, but it does not reclassify
+V1 and is not an official V2 benchmark. An official result requires a new post-registration run
+directory, generation seed, judge seed, generation artifact, blind packet, and judge artifacts.
+
+The completed local diagnostic is stored in ignored files `diagnostic-v2.json` and
+`diagnostic-v2.md` under the frozen V1 run directory. It produced schema v3 and passed all V2 rules;
+builder fit had a `5.000` full-pipeline mean, `+0.350` lift, and `[0.175, 0.550]` interval. This is
+implementation evidence only and does not satisfy PG-027's fresh-run requirement.
+
 ### Cost boundary
 
 The completed generation was estimated at approximately `$4.04`. The planned Sol/Luna judge run was
 estimated at approximately `$2–$3.50`, keeping the projected combined usage below the stated `$11`
 budget. These are planning estimates only; actual token usage and [OpenAI API pricing](https://developers.openai.com/api/docs/pricing)
-are authoritative. The implementation and test commands make no paid judge calls.
+are authoritative. The implementation, tests, and local V2 diagnostic make no paid judge calls. No
+fresh V2 provider run is authorized by this document.
 
 ## References
 
@@ -210,3 +252,4 @@ are authoritative. The implementation and test commands make no paid judge calls
 - `TASKS.md`, PG-027: implementation status and definition of done.
 - `evaluation/README.md`: artifact boundaries and command reference.
 - `evaluation/scenarios.v1.json`: versioned synthetic benchmark set.
+- `demo-steps-v2.md`: guarded fresh V2 runner and operator steps.

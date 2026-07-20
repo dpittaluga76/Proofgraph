@@ -158,8 +158,8 @@ It makes exactly 40 paid calls and materializes two 80-rating artifacts only aft
 judges never receive the private map, generation metadata, peer scores, or variant labels.
 `analyze_evaluation` always takes the arithmetic mean of both judge scores, reports every absolute
 two-point disagreement without adjudication, retains both original scores and rationales, and emits a
-schema-v2 result with all seven dimensions and deterministic 10,000-resample paired
-scenario-bootstrap intervals.
+schema-v2 V1 result or an explicitly selected schema-v3 V2 result with all seven dimensions and
+deterministic 10,000-resample paired scenario-bootstrap intervals.
 
 The full workflow, artifact privacy boundaries, and commands are documented in
 [`evaluation/README.md`](evaluation/README.md). Terra generation, the 40-call judge run, rating
@@ -176,6 +176,19 @@ Both judges scored full-pipeline builder fit at `5.0`, while generic already sco
 leaving insufficient headroom for the frozen `+0.500` relative-lift rule. Only 2 of 560 score
 comparisons had disagreements of at least two points, and neither concerned builder fit. The report
 therefore remains an authoritative FAIL rather than being adjusted after observation.
+
+The pre-registered V2 acceptance rule is implemented locally. Evidence relevance, specificity, and
+testability retain the V1 `+0.500` mean-lift and positive confidence-interval requirements. Builder
+fit instead requires a full-pipeline mean of at least `4.500 / 5` and a non-negative paired
+confidence-interval lower bound. V1 remains the default and reproducible schema-v2 path; V2 requires
+explicit `--acceptance-rule v2` selection and emits schema v3. Reanalysis of V1 ratings under V2 is
+diagnostic only; the local schema-v3 diagnostic passes with a `5.000` builder-fit mean while leaving
+the frozen V1 verdict unchanged. No fresh paid V2 run has been authorized or presented as an official
+result.
+
+The fresh local V2 workflow is automated by [`scripts/run-evaluation-v2.ps1`](scripts/run-evaluation-v2.ps1)
+and documented in [`demo-steps-v2.md`](demo-steps-v2.md). Its paid stages still require explicit
+cost confirmation, and its dry-run mode creates no artifacts or provider calls.
 
 ## Current end-to-end workflow
 

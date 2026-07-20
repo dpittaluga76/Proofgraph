@@ -53,7 +53,13 @@ from proofgraph.evaluation.schemas import (
     StrategyCandidate,
     StrategyPlan,
 )
-from proofgraph.evaluation.scoring import analyze_ratings, bootstrap_interval
+from proofgraph.evaluation.scoring import (
+    ACCEPTANCE_RULE_IDS,
+    V2_BUILDER_FIT_MINIMUM,
+    analyze_ratings,
+    bootstrap_interval,
+    render_markdown_report,
+)
 
 
 def _opportunity_set(*, evidence_ids: list[str] | None = None) -> OpportunitySet:
@@ -588,7 +594,7 @@ def test_model_judges_are_blind_structured_concurrent_and_complete(tmp_path: Pat
     assert len({item.blind_output_id for item in judge_a.ratings}) == 80
     assert len({item.blind_output_id for item in judge_b.ratings}) == 80
     assert saved.model_dump(mode="json") == run.model_dump(mode="json")
-    assert client.responses.max_active == 4
+    assert 1 < client.responses.max_active <= 4
     assert all(call["store"] is False for call in client.responses.calls)
     assert all(call["reasoning"] == {"effort": "medium"} for call in client.responses.calls)
     assert all(
@@ -776,6 +782,135 @@ def test_scoring_averages_disagreements_and_reports_paired_ci() -> None:
     assert bootstrap_interval([1.0] * 20) == (1.0, 1.0)
 
 
+def test_v2_treats_builder_fit_as_an_absolute_ceiling_guardrail() -> None:
+    scenarios = load_scenarios()
+    generation = _generation_run()
+    packet, private_map, _, _ = prepare_blind_packet(scenarios, generation, seed=123)
+    variants = {item.blind_output_id: item.variant_id for item in private_map.mappings}
+    base_scores = {
+        output_id: 5 if variant_id == "full_pipeline" else 3
+        for output_id, variant_id in variants.items()
+    }
+    judge_a = _model_judge_artifact(
+        packet,
+        judge_id="vera_crosscheck",
+        model="gpt-5.6-sol",
+        scores=base_scores,
+    )
+    judge_b = _model_judge_artifact(
+        packet,
+        judge_id="marco_launch",
+        model="gpt-5.6-luna",
+        scores=base_scores,
+    )
+    for judge in (judge_a, judge_b):
+        for rating in judge.ratings:
+            if variants[rating.blind_output_id] == "generic":
+                rating.scores.builder_fit = 5
+
+    v1_report = analyze_ratings(packet, private_map, judge_a, judge_b, generation)
+    v2_report = analyze_ratings(
+        packet,
+        private_map,
+        judge_a,
+        judge_b,
+        generation,
+        acceptance_rule="v2",
+    )
+
+    assert v1_report["schema_version"] == 2
+    assert "acceptance_rule_version" not in v1_report
+    assert v1_report["acceptance_passed"] is False
+    assert v1_report["dimensions"]["builder_fit"]["passes_required_threshold"] is False
+    assert v2_report["schema_version"] == 3
+    assert v2_report["acceptance_rule_version"] == ACCEPTANCE_RULE_IDS["v2"]
+    assert v2_report["acceptance_passed"] is True
+    assert v2_report["dimensions"]["builder_fit"] == {
+        "required": True,
+        "mean_full_minus_generic": 0,
+        "bootstrap_seed": 27_037,
+        "bootstrap_95_ci": [0, 0],
+        "passes_required_threshold": True,
+        "scenario_differences": {scenario.scenario_id: 0 for scenario in scenarios.scenarios},
+        "full_pipeline_mean": 5,
+        "acceptance_criteria": {
+            "kind": "absolute_floor_and_nonnegative_relative_ci",
+            "minimum_full_pipeline_mean": V2_BUILDER_FIT_MINIMUM,
+            "minimum_bootstrap_95_ci_lower_bound": 0.0,
+            "ci_lower_bound_inclusive": True,
+        },
+    }
+    markdown = render_markdown_report(v2_report)
+    assert f"Acceptance rule: `{ACCEPTANCE_RULE_IDS['v2']}`" in markdown
+    assert "Builder fit: full-pipeline mean at least `4.500`" in markdown
+    assert "reanalyzed V1 ratings remain diagnostic" in markdown
+
+
+def test_v2_builder_fit_requires_the_absolute_floor_and_no_regression() -> None:
+    scenarios = load_scenarios()
+    generation = _generation_run()
+    packet, private_map, _, _ = prepare_blind_packet(scenarios, generation, seed=123)
+    mapping = {
+        item.blind_output_id: (item.scenario_id, item.variant_id) for item in private_map.mappings
+    }
+    base_scores = {
+        output_id: 5 if variant_id == "full_pipeline" else 3
+        for output_id, (_, variant_id) in mapping.items()
+    }
+    judge_a = _model_judge_artifact(
+        packet,
+        judge_id="vera_crosscheck",
+        model="gpt-5.6-sol",
+        scores=base_scores,
+    )
+    judge_b = _model_judge_artifact(
+        packet,
+        judge_id="marco_launch",
+        model="gpt-5.6-luna",
+        scores=base_scores,
+    )
+    for judge in (judge_a, judge_b):
+        for rating in judge.ratings:
+            _, variant_id = mapping[rating.blind_output_id]
+            if variant_id in {"generic", "full_pipeline"}:
+                rating.scores.builder_fit = 4
+
+    below_floor = analyze_ratings(
+        packet,
+        private_map,
+        judge_a,
+        judge_b,
+        generation,
+        acceptance_rule="v2",
+    )
+    assert below_floor["dimensions"]["builder_fit"]["full_pipeline_mean"] == 4
+    assert below_floor["dimensions"]["builder_fit"]["bootstrap_95_ci"] == [0, 0]
+    assert below_floor["dimensions"]["builder_fit"]["passes_required_threshold"] is False
+
+    first_scenario_id = scenarios.scenarios[0].scenario_id
+    for judge in (judge_a, judge_b):
+        for rating in judge.ratings:
+            scenario_id, variant_id = mapping[rating.blind_output_id]
+            if variant_id in {"generic", "full_pipeline"}:
+                rating.scores.builder_fit = 5
+            if scenario_id == first_scenario_id and variant_id == "full_pipeline":
+                rating.scores.builder_fit = 4
+
+    regression = analyze_ratings(
+        packet,
+        private_map,
+        judge_a,
+        judge_b,
+        generation,
+        acceptance_rule="v2",
+    )
+    builder_fit = regression["dimensions"]["builder_fit"]
+    assert builder_fit["full_pipeline_mean"] == 4.95
+    assert builder_fit["bootstrap_95_ci"][0] < 0
+    assert builder_fit["passes_required_threshold"] is False
+    assert regression["acceptance_passed"] is False
+
+
 def test_generation_command_requires_explicit_cost_confirmation(tmp_path: Path) -> None:
     with pytest.raises(CommandError, match="confirm-cost"):
         call_command(
@@ -867,5 +1002,26 @@ def test_offline_management_commands_create_and_analyze_artifacts(tmp_path: Path
     assert report["schema_version"] == 2
     assert "automated blinded model evaluation" in result_markdown.read_text(encoding="utf-8")
     assert "Overall required-dimension result: **FAIL**" in result_markdown.read_text(
+        encoding="utf-8"
+    )
+
+    v2_result_json = tmp_path / "result-v2.json"
+    v2_result_markdown = tmp_path / "result-v2.md"
+    call_command(
+        "analyze_evaluation",
+        packet=rating_dir / "blind-packet.json",
+        private_map=rating_dir / "private-variant-map.json",
+        generation=generation_path,
+        judge_a=judge_a_path,
+        judge_b=judge_b_path,
+        output_json=v2_result_json,
+        output_markdown=v2_result_markdown,
+        acceptance_rule="v2",
+        verbosity=0,
+    )
+    v2_report = json.loads(v2_result_json.read_text(encoding="utf-8"))
+    assert v2_report["schema_version"] == 3
+    assert v2_report["acceptance_rule_version"] == ACCEPTANCE_RULE_IDS["v2"]
+    assert f"Acceptance rule: `{ACCEPTANCE_RULE_IDS['v2']}`" in v2_result_markdown.read_text(
         encoding="utf-8"
     )

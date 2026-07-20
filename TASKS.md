@@ -12,7 +12,7 @@ Current phase entry criteria:
 - The local PostgreSQL, backend, frontend, and browser verification gates pass.
 - PG-026 delivers the isolated, resettable, quota-protected anonymous demo locally.
 
-Current implementation task: **PG-027**. The 20-scenario Terra generation and blind packet are complete. The automated two-judge implementation and explicit cost-bearing judge run remain before the numerical result can close the task.
+Current implementation task: **PG-027**. The frozen V1 generation, two-judge run, and failed result are complete. Current work is limited to the pre-registered local V2 acceptance rule, versioned offline analysis, reporting, and tests; no V2 paid run has been authorized yet.
 
 ## Pending
 
@@ -38,7 +38,7 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Outcome:** Measure whether orchestration materially beats generic brainstorming.
 
-**Progress (July 15, 2026):** The internal deterministic harness has 20 versioned synthetic
+**Progress (July 16, 2026):** The internal deterministic harness has 20 versioned synthetic
 scenarios, four frozen GPT-5.6-family structured-output paths, an explicit model allowlist, resumable
 six-worker generation, deterministic per-scenario blinding, and 10,000-resample paired bootstrap
 reporting. The Terra run completed all 200 provider stages and produced 80 normalized outputs; its
@@ -51,8 +51,17 @@ per judge. The frozen v1 report passed evidence relevance (`+2.925`), specificit
 testability (`+1.650`), but failed builder fit: its `+0.350` mean lift had a positive `[0.175, 0.550]`
 95% interval but missed the required `+0.500` mean. Both judges gave the full pipeline the maximum
 builder-fit score while the generic baseline was already near the ceiling. The result remains an
-authoritative FAIL; PG-027 stays Pending while any benchmark-v2 correction is pre-registered and
-reviewed before another paid run. Operational state is tracked in `demo-steps.md`.
+authoritative FAIL. The V2 correction is now pre-registered in `design.md`: evidence relevance,
+specificity, and testability retain the `+0.500` positive-lift rule, while builder fit requires a
+full-pipeline mean of at least `4.500` and a non-negative paired-bootstrap confidence-interval lower
+bound. V1 remains the backward-compatible default and V2 requires explicit offline selection and a
+schema-v3 report. The local implementation and all 17 evaluation tests pass without provider calls;
+the V1-artifact V2 diagnostic also produces the expected schema-v3 PASS, including builder-fit mean
+`5.000`, lift `+0.350`, and interval `[0.175, 0.550]`. That reanalysis is diagnostic only. Any fresh
+generation or judge run requires separate authorization. Local work now includes the guarded,
+resumable `scripts/run-evaluation-v2.ps1` runner and dedicated `demo-steps-v2.md` operator guide. Its
+syntax, no-write dry run, paid-stage guard, and V1-directory protection pass without executing paid
+stages. PG-027 remains Pending. Operational state is tracked in `demo-steps.md`.
 
 **Done when:**
 
@@ -60,7 +69,8 @@ reviewed before another paid run. Operational state is tracked in `demo-steps.md
 - Variant labels/order are randomized; Vera Crosscheck and Marco Launch independently score every opaque output on the fixed five-point rubric for specificity, evidence relevance, novelty, feasibility, economic leverage, testability, and builder fit.
 - Effective scores are the arithmetic mean of both model judges; absolute two-point disagreements, both original scores, and both rationales are retained and reported without adjudication.
 - Results report each dimension separately with reproducible model/prompt/strategy versions.
-- For evidence relevance, specificity, testability, and builder fit, paired scenario-level results show at least `+0.5` mean points over the generic baseline and a 95% bootstrap confidence-interval lower bound above zero.
+- Under explicit `comparative_acceptance_v2`, evidence relevance, specificity, and testability each show at least `+0.5` mean points over generic with a 95% paired-bootstrap confidence-interval lower bound above zero; builder fit has a full-pipeline mean of at least `4.5` and a paired full-minus-generic confidence-interval lower bound of at least zero.
+- The authoritative V1 failure remains unchanged, and the passing V2 result uses fresh post-registration generation and judge artifacts rather than reclassifying V1.
 - Evaluation placement decision **DQ-006** determines whether the harness remains internal or ships in the UI.
 
 #### PG-028 — Aggregate production observability and verify security hardening
