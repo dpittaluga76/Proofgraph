@@ -134,18 +134,18 @@ support SSE.
 
 1. If a Cloudflare credential has appeared in chat, a screenshot, a command transcript, or a log,
    rotate or delete it before continuing. Do not reuse it or paste its replacement into this file.
-2. Copy [`.env.public.example`](.env.public.example) to the ignored `.env.public` file and replace
-   every placeholder. Use distinct high-entropy values for the PostgreSQL password and Django
-   secret. Put the exact public hostname in `DJANGO_ALLOWED_HOSTS` and its exact `https://` origin
-   in `DJANGO_CSRF_TRUSTED_ORIGINS`.
+2. Generate the ignored `.env.public` file with distinct high-entropy PostgreSQL and Django
+   secrets. The initializer accepts the exact public hostname and can copy the existing local
+   server-side OpenAI key without printing it. Omit `-CopyOpenAIKey` for replay-only deployment.
 3. Keep `OPENAI_API_KEY` empty unless existing provider or hackathon credits explicitly cover the
    single minimal hybrid check. Replay needs no provider key.
 4. Make the password embedded in `DATABASE_URL` identical to `POSTGRES_PASSWORD`; a URL-safe
    password avoids accidental URL parsing errors.
 
 ```powershell
-Copy-Item .env.public.example .env.public
-notepad .env.public
+./scripts/initialize-public-env.ps1 `
+  -Hostname proofgraph.ailoomweb.com `
+  -CopyOpenAIKey
 
 docker compose -f compose.public.yaml config --quiet
 docker compose -f compose.public.yaml up --detach --build
@@ -156,7 +156,7 @@ docker compose -f compose.public.yaml ps
 loopback origin with the configured public hostname in the Host header:
 
 ```powershell
-$hostname = "proofgraph.example.com" # replace with the exact configured hostname
+$hostname = "proofgraph.ailoomweb.com"
 curl.exe --noproxy "*" --fail --header "Host: $hostname" `
   --header "X-Forwarded-Proto: https" http://127.0.0.1:8000/api/health
 ```
@@ -169,11 +169,11 @@ The browser bundle contains no provider credential.
 ### Configure the named tunnel
 
 1. Install `cloudflared` on Windows and create a remotely managed named tunnel in the Cloudflare
-   dashboard for a domain already active in the account.
+   dashboard for the active `ailoomweb.com` zone.
 2. In an elevated PowerShell window, install the connector as a Windows service using the newly
    rotated token shown by the dashboard. Enter it there—not in Codex, Git, `.env.public`, or a
    screenshot.
-3. Add a public hostname such as `proofgraph.example.com` with service
+3. Add the public hostname `proofgraph.ailoomweb.com` with service
    `http://localhost:8000`.
 4. Add a cache-bypass rule for `/api/*`; hashed `/assets/*` files may remain cacheable.
 5. Set Docker Desktop to start at login and disable sleep while connected to AC power. Do not add
@@ -182,10 +182,11 @@ The browser bundle contains no provider credential.
 After DNS and the connector are healthy, replace the placeholder below and re-run the checks from
 an anonymous browser and a separate network:
 
-> **Public demo:** pending named-tunnel hostname and external verification.
+> **Public demo:** `https://proofgraph.ailoomweb.com` — provisioning and external verification are
+> still pending; do not treat this as available until PG-029 acceptance is recorded.
 
 ```powershell
-$url = "https://proofgraph.example.com" # replace
+$url = "https://proofgraph.ailoomweb.com"
 curl.exe --fail --silent --show-error --output NUL `
   --write-out "HTTPS %{http_code}; HTTP/%{http_version}`n" $url
 

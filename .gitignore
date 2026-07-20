@@ -1,4 +1,5 @@
 .env
+.env.cloudflare.local
 .env.public
 .env.public.test
 .venv/
