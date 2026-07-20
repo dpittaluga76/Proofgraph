@@ -12,7 +12,7 @@ Current phase entry criteria:
 - The local PostgreSQL, backend, frontend, and browser verification gates pass.
 - PG-026 delivers the isolated, resettable, quota-protected anonymous demo locally.
 
-Current implementation task: **PG-027**. The frozen V1 generation, two-judge run, and failed result are complete. Current work is limited to the pre-registered local V2 acceptance rule, versioned offline analysis, reporting, and tests; no V2 paid run has been authorized yet.
+Current implementation task: **PG-027**. The frozen V1 generation, two-judge run, and failed result are complete. The pre-registered V2 acceptance rule, versioned offline analysis and reporting, focused tests, guarded runner, and operator runbook are implemented and verified locally. No fresh paid V2 run has been authorized or completed; PG-027 remains Pending until a distinct post-registration V2 generation and two-judge run passes.
 
 ## Pending
 
@@ -38,7 +38,7 @@ Decision tasks are listed before their dependents. Each completed decision must 
 
 **Outcome:** Measure whether orchestration materially beats generic brainstorming.
 
-**Progress (July 16, 2026):** The internal deterministic harness has 20 versioned synthetic
+**Progress (July 20, 2026):** The internal deterministic harness has 20 versioned synthetic
 scenarios, four frozen GPT-5.6-family structured-output paths, an explicit model allowlist, resumable
 six-worker generation, deterministic per-scenario blinding, and 10,000-resample paired bootstrap
 reporting. The Terra run completed all 200 provider stages and produced 80 normalized outputs; its
@@ -60,8 +60,9 @@ the V1-artifact V2 diagnostic also produces the expected schema-v3 PASS, includi
 `5.000`, lift `+0.350`, and interval `[0.175, 0.550]`. That reanalysis is diagnostic only. Any fresh
 generation or judge run requires separate authorization. Local work now includes the guarded,
 resumable `scripts/run-evaluation-v2.ps1` runner and dedicated `demo-steps-v2.md` operator guide. Its
-syntax, no-write dry run, paid-stage guard, and V1-directory protection pass without executing paid
-stages. PG-027 remains Pending. Operational state is tracked in `demo-steps.md`.
+syntax, no-write dry run, paid-stage guard, V1-directory protection, and manifestless-artifact
+rejection pass without executing paid stages. PG-027 remains Pending. Operational state is tracked
+in `demo-steps.md`.
 
 **Done when:**
 

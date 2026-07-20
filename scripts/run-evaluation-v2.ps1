@@ -172,12 +172,9 @@ if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
 }
 else {
     $ExistingArtifacts = @(
-        @(
-            (Join-Path $RunPath "private-generation.json"),
-            (Join-Path $RunPath "rating/private-judge-run.json"),
-            (Join-Path $RunPath "result.json"),
-            (Join-Path $RunPath "result.md")
-        ) | Where-Object { Test-Path -LiteralPath $_ }
+        if (Test-Path -LiteralPath $RunPath -PathType Container) {
+            Get-ChildItem -LiteralPath $RunPath -File -Recurse -Force
+        }
     )
     if ($ExistingArtifacts.Count -gt 0) {
         throw (
