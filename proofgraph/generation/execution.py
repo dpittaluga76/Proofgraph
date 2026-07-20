@@ -242,7 +242,15 @@ def _cancel_if_requested(lease: RunLease, *, stage_id: Any | None = None) -> boo
     emit_telemetry(
         "run.cancelled",
         run_id=lease.run_id,
+        canvas_id=lease.canvas_id,
+        worker_id=lease.worker_id,
         lease_epoch=lease.lease_epoch,
+        attempt=run.attempt,
+        duration_ms=(
+            int((run.completed_at - run.started_at).total_seconds() * 1_000)
+            if run.started_at is not None and run.completed_at is not None
+            else None
+        ),
         **regeneration_dimensions,
     )
     emit_patch_regeneration_terminal(
@@ -317,6 +325,10 @@ def _begin_stage(
     emit_telemetry(
         "stage.started",
         run_id=lease.run_id,
+        canvas_id=lease.canvas_id,
+        worker_id=lease.worker_id,
+        lease_epoch=lease.lease_epoch,
+        attempt=run.attempt,
         stage=stage_name,
         stage_attempt=stage.attempt,
     )
@@ -365,6 +377,9 @@ def _complete_stage(
         "stage.completed",
         run_id=lease.run_id,
         canvas_id=lease.canvas_id,
+        worker_id=lease.worker_id,
+        lease_epoch=lease.lease_epoch,
+        attempt=run.attempt,
         stage=result.stage_name,
         stage_attempt=stage.attempt,
         duration_ms=duration_ms,
@@ -444,9 +459,19 @@ def _fail_run(
     emit_telemetry(
         "run.failed",
         run_id=lease.run_id,
+        canvas_id=lease.canvas_id,
+        worker_id=lease.worker_id,
+        lease_epoch=lease.lease_epoch,
+        attempt=run.attempt,
+        max_attempts=run.max_attempts,
         code=persisted_error.code,
         retryable=persisted_error.retryable,
         stage=persisted_error.stage,
+        duration_ms=(
+            int((run.completed_at - run.started_at).total_seconds() * 1_000)
+            if run.started_at is not None and run.completed_at is not None
+            else None
+        ),
         **regeneration_dimensions,
     )
     emit_patch_regeneration_terminal(
@@ -514,7 +539,12 @@ def _persist_patch_then_complete(lease: RunLease, patch_output: Any) -> bool:
     emit_telemetry(
         "patch.ready",
         run_id=lease.run_id,
+        canvas_id=lease.canvas_id,
         patch_id=patch.id,
+        worker_id=lease.worker_id,
+        lease_epoch=lease.lease_epoch,
+        attempt=run.attempt,
+        operation_count=len(operations),
         **regeneration_dimensions,
     )
 
@@ -545,7 +575,16 @@ def _persist_patch_then_complete(lease: RunLease, patch_output: Any) -> bool:
     emit_telemetry(
         "run.completed",
         run_id=lease.run_id,
+        canvas_id=lease.canvas_id,
         patch_id=patch.id,
+        worker_id=lease.worker_id,
+        lease_epoch=lease.lease_epoch,
+        attempt=run.attempt,
+        duration_ms=(
+            int((run.completed_at - run.started_at).total_seconds() * 1_000)
+            if run.started_at is not None and run.completed_at is not None
+            else None
+        ),
         **regeneration_dimensions,
     )
     emit_patch_regeneration_terminal(
@@ -606,6 +645,10 @@ def process_claimed_run(
                 emit_telemetry(
                     "stage.reused",
                     run_id=lease.run_id,
+                    canvas_id=lease.canvas_id,
+                    worker_id=lease.worker_id,
+                    lease_epoch=lease.lease_epoch,
+                    attempt=run.attempt,
                     stage=stage_name,
                     regeneration_phase=step.phase,
                     regeneration_batch_size=len(step.targets),
@@ -622,6 +665,11 @@ def process_claimed_run(
                         lease_epoch=lease.lease_epoch,
                         attempt=run.attempt,
                         execution_profile_id=configuration.profile_id,
+                        provider_identity=configuration.provider_identity,
+                        pipeline_version=configuration.pipeline_version,
+                        prompt_version=configuration.prompt_version,
+                        strategy_version=configuration.strategy_version,
+                        fixture_version=configuration.fixture_version,
                     ):
                         result = composition.executor.execute(
                             stage_name=stage_name,

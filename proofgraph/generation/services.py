@@ -147,7 +147,14 @@ def create_generation_run(
         canvas_id=canvas_id,
         demo_session_id=demo_session_id,
         operation=run.operation,
+        operation_key=run.idempotency_key,
+        attempt=run.attempt,
         profile_id=request.execution_profile_id,
+        provider_identity=configuration.provider_identity,
+        pipeline_version=configuration.pipeline_version,
+        prompt_version=configuration.prompt_version,
+        strategy_version=configuration.strategy_version,
+        fixture_version=configuration.fixture_version,
     )
     return result
 
@@ -222,8 +229,26 @@ def cancel_generation_run(run_id: uuid.UUID) -> ServiceResult:
                 message="The run is no longer cancellable.",
                 details={"status": run.status},
             )
-    emit_telemetry("run.cancel_requested", run_id=run.id, status=run.status)
+    emit_telemetry(
+        "run.cancel_requested",
+        run_id=run.id,
+        canvas_id=run.canvas_id,
+        demo_session_id=run.demo_session_id,
+        operation_key=run.idempotency_key,
+        status=run.status,
+        attempt=run.attempt,
+    )
     if run.status == RunStatus.CANCELLED:
+        emit_telemetry(
+            "run.cancelled",
+            run_id=run.id,
+            canvas_id=run.canvas_id,
+            demo_session_id=run.demo_session_id,
+            operation_key=run.idempotency_key,
+            attempt=run.attempt,
+            reason="cancelled_before_claim",
+            duration_ms=0,
+        )
         emit_patch_regeneration_terminal(
             run_id=run.id,
             canvas_id=run.canvas_id,
@@ -278,5 +303,14 @@ def retry_generation_run(run_id: uuid.UUID) -> ServiceResult:
             {"next_attempt": run.attempt + 1},
         )
         result = ServiceResult(serialize_generation_run(run), 202)
-    emit_telemetry("run.retry_requested", run_id=run.id, next_attempt=run.attempt + 1)
+    emit_telemetry(
+        "run.retry_requested",
+        run_id=run.id,
+        canvas_id=run.canvas_id,
+        demo_session_id=run.demo_session_id,
+        operation_key=run.idempotency_key,
+        attempt=run.attempt,
+        next_attempt=run.attempt + 1,
+        max_attempts=run.max_attempts,
+    )
     return result

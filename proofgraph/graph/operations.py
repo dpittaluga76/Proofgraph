@@ -1042,6 +1042,15 @@ def apply_graph_operation(
                     code="operation_key_conflict",
                     message="The operation key was already used for different content.",
                 )
+            emit_graph_telemetry(
+                "graph.operation_replayed",
+                canvas_id=canvas.id,
+                graph_operation_id=existing.id,
+                operation_key=existing.operation_key,
+                operation_type=existing.operation_type,
+                actor_type=existing.actor_type,
+                canvas_revision=existing.canvas_revision,
+            )
             return existing.result_payload
 
         handler = OPERATION_HANDLERS.get(op)
@@ -1088,6 +1097,21 @@ def apply_graph_operation(
             result_payload=result_payload,
             canvas_revision=new_revision,
             created_at=now,
+        )
+        telemetry_events.append(
+            (
+                "graph.operation_committed",
+                {
+                    "canvas_id": canvas.id,
+                    "graph_operation_id": graph_operation.id,
+                    "operation_key": graph_operation.operation_key,
+                    "operation_type": graph_operation.operation_type,
+                    "actor_type": graph_operation.actor_type,
+                    "canvas_revision": graph_operation.canvas_revision,
+                    "stale_count": len(eligible_node_ids),
+                    "newly_stale_count": len(newly_stale_node_ids),
+                },
+            )
         )
         if op == "REJECT_EVIDENCE":
             _stamp_evidence_review_operation(canvas, graph_operation, result, now)

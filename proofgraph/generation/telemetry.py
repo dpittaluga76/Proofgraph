@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
+
+from proofgraph.runtime.telemetry import emit_structured_telemetry
 
 logger = logging.getLogger("proofgraph.generation")
 _dimensions: ContextVar[dict[str, Any] | None] = ContextVar(
@@ -26,13 +27,11 @@ def telemetry_context(**dimensions: Any) -> Iterator[None]:
 
 def emit_telemetry(name: str, **dimensions: Any) -> None:
     correlated = {**(_dimensions.get() or {}), **dimensions}
-    logger.info(
-        json.dumps(
-            {"event": name, **correlated},
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        )
+    emit_structured_telemetry(
+        logger,
+        component="generation",
+        event=name,
+        fields=correlated,
     )
 
 

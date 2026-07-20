@@ -194,6 +194,7 @@ class OpenAIStructuredProviders:
         except ValidationError:
             raise
         except Exception as error:
+            latency_ms = int((time.monotonic() - started) * 1_000)
             status = getattr(error, "status_code", None)
             name = type(error).__name__.casefold()
             is_timeout = "timeout" in name
@@ -209,6 +210,15 @@ class OpenAIStructuredProviders:
                 else "openai_rate_limited"
                 if status == 429
                 else "openai_structured_output_failed"
+            )
+            emit_telemetry(
+                "provider.failure",
+                stage=stage_name,
+                provider=self.model,
+                latency_ms=latency_ms,
+                code=code,
+                retryable=retryable,
+                status=status,
             )
             raise ProviderExecutionError(
                 code,

@@ -269,12 +269,17 @@ def test_regenerate_revalidates_current_state_rejects_original_and_links_one_run
     assert detail.json()["patch"]["regenerated_by_run_id"] == str(linked.id)
     events = [json.loads(record.message) for record in caplog.records]
     requested = next(event for event in events if event["event"] == "patch.regeneration_requested")
-    assert requested == {
-        "event": "patch.regeneration_requested",
-        "patch_id": str(patch.id),
-        "original_run_id": str(patch.run_id),
-        "canvas_id": str(patch.canvas_id),
-    }
+    assert (
+        requested.items()
+        >= {
+            "component": "generation",
+            "event": "patch.regeneration_requested",
+            "patch_id": str(patch.id),
+            "original_run_id": str(patch.run_id),
+            "canvas_id": str(patch.canvas_id),
+        }.items()
+    )
+    assert requested["timestamp"].endswith("+00:00")
 
 
 @override_settings(GENERATION_COMPOSITION_FACTORY=TEST_COMPOSITION)
@@ -410,14 +415,19 @@ def test_linked_run_terminal_state_emits_patch_regeneration_telemetry(caplog) ->
     events = [json.loads(record.message) for record in caplog.records]
     terminal = next(event for event in events if event["event"] == "patch.regeneration_terminal")
     assert cancelled.status_code == 200
-    assert terminal == {
-        "event": "patch.regeneration_terminal",
-        "patch_id": str(patch.id),
-        "original_run_id": str(patch.run_id),
-        "run_id": linked_run_id,
-        "canvas_id": str(patch.canvas_id),
-        "status": "cancelled",
-    }
+    assert (
+        terminal.items()
+        >= {
+            "component": "generation",
+            "event": "patch.regeneration_terminal",
+            "patch_id": str(patch.id),
+            "original_run_id": str(patch.run_id),
+            "run_id": linked_run_id,
+            "canvas_id": str(patch.canvas_id),
+            "status": "cancelled",
+        }.items()
+    )
+    assert terminal["timestamp"].endswith("+00:00")
 
 
 @override_settings(GENERATION_COMPOSITION_FACTORY=TEST_COMPOSITION)

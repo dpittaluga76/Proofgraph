@@ -12,6 +12,7 @@ from proofgraph.demo.models import DemoSession
 from proofgraph.demo.telemetry import emit_demo_telemetry
 from proofgraph.generation.events import append_event_locked
 from proofgraph.generation.models import GenerationEventType, GenerationRun, RunStatus
+from proofgraph.generation.telemetry import emit_telemetry
 from proofgraph.graph.lifecycle import delete_canvas
 
 
@@ -87,6 +88,7 @@ def _cleanup_locked_session(
             lambda: emit_demo_telemetry(
                 "demo.cleanup_waiting_for_fence",
                 demo_session_id=session.id,
+                canvas_id=session.active_canvas_id,
                 active_run_count=len(runs),
             )
         )
@@ -133,4 +135,22 @@ def fence_and_terminalize_run(
         GenerationEventType.RUN_CANCELLED if cancelled else GenerationEventType.RUN_COMPLETED,
         {"reason": reason, "attempt": run.attempt},
         terminal_once=True,
+    )
+    transaction.on_commit(
+        lambda: emit_telemetry(
+            "run.cancelled" if cancelled else "run.completed",
+            run_id=run.id,
+            canvas_id=run.canvas_id,
+            demo_session_id=run.demo_session_id,
+            operation_key=run.idempotency_key,
+            lease_epoch=run.lease_epoch,
+            attempt=run.attempt,
+            reason=reason,
+            terminalized_by="demo_cleanup",
+            duration_ms=(
+                int((run.completed_at - run.started_at).total_seconds() * 1_000)
+                if run.started_at is not None and run.completed_at is not None
+                else None
+            ),
+        )
     )

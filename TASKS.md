@@ -4,7 +4,7 @@ This backlog is derived from `design.md`, which is the source of truth. Tasks ar
 
 ## Current Goal
 
-Continue **Phase 5: Demo hardening, evaluation, and delivery** with production observability and security hardening.
+Continue **Phase 5: Demo hardening, evaluation, and delivery** with public deployment.
 
 Current phase entry criteria:
 
@@ -12,28 +12,13 @@ Current phase entry criteria:
 - The local PostgreSQL, backend, frontend, and browser verification gates pass.
 - PG-026 delivers the isolated, resettable, quota-protected anonymous demo locally.
 - PG-027 proves the comparative evaluation satisfies the pre-registered V2 acceptance rule.
+- PG-028 aggregates production telemetry and verifies the public-demo security boundaries.
 
-Current implementation task: **PG-028**. PG-027 is complete after the fresh post-registration V2 benchmark passed all four required dimensions. DQ-007 is also resolved: the final product and submission name is **ProofGraph**.
+Current implementation task: **PG-029**. PG-028 is complete after its correlated diagnostic drill, audit inspection, security regression suite, and full repository gates passed. DQ-007 is also resolved: the final product and submission name is **ProofGraph**.
 
 ## Pending
 
 ### Phase 5 — Demo hardening, evaluation, and delivery
-
-#### PG-028 — Aggregate production observability and verify security hardening
-
-**Depends on:** PG-025, PG-026
-
-**Outcome:** Prove the component-owned instrumentation is complete and usable, and verify that trust boundaries already enforced by ingestion, extraction, synthesis, and rendering remain effective in the public demo.
-
-**Done when:**
-
-- Structured logs emitted by their owning run, worker, provider, cache, and patch components include all identifiers, lease data, versions, durations, token usage, counts, and errors listed in design section 25.1.
-- Existing component metrics are aggregated into queue, stage, failure/retry, lease, provider, patch, and evidence-quality views; this task does not defer first-time instrumentation from earlier phases.
-- Aggregation includes attempt/cancellation terminalization, source-ingestion reclaim, stale and pending-patch regeneration, demo session creation/expiry/cleanup, reset/profile rejection, quota rejection, circuit-breaker, and replay-switch telemetry emitted by their owning tasks.
-- An end-to-end diagnostic drill traces one successful run, one retryable provider failure, one lease loss, and one patch conflict through correlated logs, metrics, events, and audit records.
-- Audit records preserve prompts/strategies/models, context, sources, claims, candidates, critiques, accepted/rejected operations, and user edits.
-- End-to-end security tests verify endpoint-wide anonymous resource authorization, sanitized rendering, server-side secrets, URL/redirect defenses, user-text isolation, prompt-injection resistance, and intellectual-property output restrictions.
-- No third-party or user-supplied content can alter system instructions or trigger command execution.
 
 #### PG-029 — Deploy the public web, worker, and PostgreSQL runtime
 
@@ -79,6 +64,30 @@ Current implementation task: **PG-028**. PG-027 is complete after the fresh post
 - Final submission artifacts and links, including the primary implementation Project task's `/feedback` Session ID, are checked against the official rules.
 
 ## Done
+
+### PG-028 — Aggregate production observability and verify security hardening
+
+**Completed:** July 20, 2026
+
+**Depends on:** PG-025, PG-026
+
+**Outcome:** Proved the component-owned instrumentation is complete and usable, and verified that trust boundaries enforced by ingestion, extraction, synthesis, and rendering remain effective in the public demo.
+
+**Completion:** A common structured-telemetry boundary now stamps every record with a UTC timestamp and component, normalizes identifiers, and recursively redacts credentials, authorization values, cookies, lease tokens, and sensitive URL query values. Run, queue, stage, provider, research, cache, patch, graph-operation, source-ingestion, cancellation/attempt terminalization, regeneration, and demo lifecycle emitters retain their applicable correlation, lease, attempt, operation-key, version, duration, response, token, count, cache, and error dimensions. `observability_report` aggregates these records into operational views, reports missing required fields, optionally joins them to durable PostgreSQL audit state, and fails a strict four-scenario diagnostic drill when any correlation is absent.
+
+The drill uses real component emissions and durable state for a successful run, retryable provider timeout, fenced lease loss, and immutable patch conflict. Audit inspection covers frozen prompt/strategy/provider-model/fixture versions, packed context, source and claim checkpoints, candidates, critiques, patch candidates and decisions, and direct user edits. The security gate combines endpoint-wide anonymous ownership and CSRF checks, server-side secret non-disclosure, URL/redirect/private-network defenses, derived-only source retention, isolated untrusted model inputs, adversarial IP-policy validation, inert command-like user text, and React text escaping.
+
+**Done when:**
+
+- Structured logs emitted by their owning run, worker, provider, cache, and patch components include all identifiers, lease data, versions, durations, token usage, counts, and errors listed in design section 25.1.
+- Existing component metrics are aggregated into queue, stage, failure/retry, lease, provider, patch, and evidence-quality views; this task does not defer first-time instrumentation from earlier phases.
+- Aggregation includes attempt/cancellation terminalization, source-ingestion reclaim, stale and pending-patch regeneration, demo session creation/expiry/cleanup, reset/profile rejection, quota rejection, circuit-breaker, and replay-switch telemetry emitted by their owning tasks.
+- An end-to-end diagnostic drill traces one successful run, one retryable provider failure, one lease loss, and one patch conflict through correlated logs, metrics, events, and audit records.
+- Audit records preserve prompts/strategies/models, context, sources, claims, candidates, critiques, accepted/rejected operations, and user edits.
+- End-to-end security tests verify endpoint-wide anonymous resource authorization, sanitized rendering, server-side secrets, URL/redirect defenses, user-text isolation, prompt-injection resistance, and intellectual-property output restrictions.
+- No third-party or user-supplied content can alter system instructions or trigger command execution.
+
+**Verification:** All 284 PostgreSQL-backed backend tests and 30 frontend unit/component tests pass. Ruff lint and formatting, Django checks, migration-drift detection, and the production frontend build pass. The focused observability and security regressions pass, including required-field validation on the real diagnostic telemetry and persisted audit coverage for every reasoning and user-decision category.
 
 ### DQ-007 — Select the final product name
 

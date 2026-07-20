@@ -564,13 +564,27 @@ class BoundedResearchProvider:
                 )
                 result = ResearchBackendResult(result_sources)
             else:
-                if isinstance(backend, UserSourceResearchAdapter):
-                    result = backend.search_context(
-                        context_snapshot,
-                        max_results=MAX_RETAINED_SOURCES,
+                provider_started = time.monotonic()
+                try:
+                    if isinstance(backend, UserSourceResearchAdapter):
+                        result = backend.search_context(
+                            context_snapshot,
+                            max_results=MAX_RETAINED_SOURCES,
+                        )
+                    else:
+                        result = backend.search(
+                            query_item.query,
+                            max_results=MAX_RETAINED_SOURCES,
+                        )
+                except ProviderExecutionError as error:
+                    emit_telemetry(
+                        "research.provider_failure",
+                        provider=backend.identity,
+                        latency_ms=int((time.monotonic() - provider_started) * 1_000),
+                        code=error.code,
+                        retryable=error.retryable,
                     )
-                else:
-                    result = backend.search(query_item.query, max_results=MAX_RETAINED_SOURCES)
+                    raise
                 self.cache.put_query(
                     canvas=canvas,
                     query=query_item.query,

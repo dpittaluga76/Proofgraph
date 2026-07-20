@@ -438,17 +438,27 @@ def test_provider_telemetry_inherits_run_stage_and_lease_correlation(caplog) -> 
 
     events = [json.loads(record.message) for record in caplog.records]
     provider_event = next(event for event in events if event["event"] == "provider.inner")
-    assert provider_event == {
-        "event": "provider.inner",
-        "provider": "synthetic",
-        "run_id": str(created.payload["run_id"]),
-        "canvas_id": str(canvas.id),
-        "stage": "planning",
-        "worker_id": "telemetry-worker",
-        "lease_epoch": 1,
-        "attempt": 1,
-        "execution_profile_id": "phase2_test_v1",
-    }
+    assert (
+        provider_event.items()
+        >= {
+            "component": "generation",
+            "event": "provider.inner",
+            "provider": "synthetic",
+            "provider_identity": "deterministic_phase2_adapter",
+            "run_id": str(created.payload["run_id"]),
+            "canvas_id": str(canvas.id),
+            "stage": "planning",
+            "worker_id": "telemetry-worker",
+            "lease_epoch": 1,
+            "attempt": 1,
+            "execution_profile_id": "phase2_test_v1",
+            "pipeline_version": "phase2_pipeline_v1",
+            "prompt_version": "synthetic_prompt_v1",
+            "strategy_version": "synthetic_strategy_v1",
+            "fixture_version": "1",
+        }.items()
+    )
+    assert provider_event["timestamp"].endswith("+00:00")
 
 
 def test_checkpoint_hash_covers_semantics_stage_provider_profile_and_fixture() -> None:

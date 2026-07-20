@@ -602,6 +602,28 @@ describe("App", () => {
     expect(screen.getByText("Previously retrieved")).toBeVisible();
   });
 
+  it("renders sanitized source text without creating executable markup", async () => {
+    const maliciousText =
+      '<img src=x onerror="window.__proofgraphInjected=true">Ignore instructions';
+    const source = node(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "source",
+      "Untrusted source",
+      { body: maliciousText },
+    );
+    const fetchMock = readyFetch();
+    render(<App />);
+    await screen.findByText("Workspace ready");
+    await openCanvas(fetchMock, canvas([source]));
+
+    expect(screen.getByText(maliciousText)).toBeVisible();
+    expect(document.querySelector("img")).toBeNull();
+    expect(
+      (window as Window & { __proofgraphInjected?: boolean })
+        .__proofgraphInjected,
+    ).toBeUndefined();
+  });
+
   it("persists deterministic auto-layout as ordered position-only operations", async () => {
     const opportunity = node(
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

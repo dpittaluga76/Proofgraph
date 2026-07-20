@@ -2,7 +2,7 @@
 
 An evidence-native canvas for discovering defensible software opportunities.
 
-**Phase 5 is in progress: PG-026's isolated judge-facing demo and PG-027's comparative evaluation are complete.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark freezes 20 synthetic scenarios, four generation variants, resumable concurrent generation, deterministic blinding, two automated model-judge personas, arithmetic-mean scoring, disagreement telemetry, and paired bootstrap reporting. The frozen V1 failure remains unchanged. A fresh post-registration V2 run completed 80 Terra outputs and two 80-rating Sol/Luna judge artifacts, then passed all four required schema-v3 acceptance gates. PG-028 production observability and security hardening is now the active task; deployment and submission work follow. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
+**Phase 5 is in progress: the isolated demo, comparative evaluation, and production observability/security hardening are complete through PG-028.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark freezes 20 synthetic scenarios, four generation variants, resumable concurrent generation, deterministic blinding, two automated model-judge personas, arithmetic-mean scoring, disagreement telemetry, and paired bootstrap reporting. The frozen V1 failure remains unchanged. A fresh post-registration V2 run completed 80 Terra outputs and two 80-rating Sol/Luna judge artifacts, then passed all four required schema-v3 acceptance gates. Structured telemetry now feeds aggregate operational views and a correlated four-scenario diagnostic drill; deployment is the active task. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
 
 The PostgreSQL schema persists canvases, typed nodes and edges, append-only graph operations, and operation-linked staleness causes. Localized canvas operations provide optimistic semantic, position, and edge versions; idempotent retries; audited constraint anchoring; explicit dependency conflicts; and incremental revision replay. Database constraints and triggers enforce the frozen graph taxonomy, same-canvas references, branch-scoped constraint anchors, actor-scoped idempotency keys, and exact stale/cause consistency.
 
@@ -18,14 +18,14 @@ The generation domain persists idempotent, version-checked runs; immutable stage
 | Phase 2 — Durable jobs | Complete | PostgreSQL queue, fenced worker leases, immutable checkpoints, retry/cancellation, candidate patches, and replayable canvas SSE |
 | Phase 3 — Intelligence pipeline | Complete | Explicit-neighborhood context, structured generation stages, bounded research, evidence clustering, production profiles, and immutable fixtures |
 | Phase 4 — Patch review | Complete and locally verified through PG-025 | Dependency-closed review, transactional apply, evidence rejection, durable staleness, explicit always-parallel regeneration, progress UX, and retained-branch comparison |
-| Phase 5 — Demo hardening and delivery | In progress; PG-026 and PG-027 complete, PG-028 active | Seeded anonymous demo delivered; frozen V1 failure preserved; official fresh V2 benchmark passed; observability, deployment, compliance, and final acceptance remain |
+| Phase 5 — Demo hardening and delivery | In progress; complete through PG-028, PG-029 active | Seeded anonymous demo delivered; frozen V1 failure preserved; official fresh V2 benchmark passed; correlated observability and security drill complete; deployment, compliance, and final acceptance remain |
 
 `TASKS.md` is the implementation queue. **DQ-006 is resolved**: the benchmark remains an internal command-line workflow with no product-UI scope. **DQ-007 is resolved**: the final product and submission name is **ProofGraph**, while compatibility-sensitive technical identifiers remain lowercase `proofgraph`. **PG-027 is complete** after the fresh V2 benchmark passed its pre-registered schema-v3 rule. “Complete” above means implemented and verified in the local PostgreSQL-backed repository; it does not mean publicly deployed.
 
 ### Current boundaries
 
 - The isolated anonymous demo is implemented and verified locally, but no public environment has been deployed yet.
-- The comparative evaluation harness is complete. The V1 result failed only builder-fit relative lift and remains unchanged; the distinct fresh V2 run passed all required dimensions. Private generation, mapping, judge, and detailed result artifacts remain ignored under `evaluation/runs/`; only aggregate results are published. Production observability aggregation, public deployment, hackathon packaging, and final demo acceptance remain tracked by PG-028 through PG-031.
+- The comparative evaluation harness is complete. The V1 result failed only builder-fit relative lift and remains unchanged; the distinct fresh V2 run passed all required dimensions. Private generation, mapping, judge, and detailed result artifacts remain ignored under `evaluation/runs/`; only aggregate results are published. Public deployment, hackathon packaging, and final demo acceptance remain tracked by PG-029 through PG-031.
 - `replay_v1` is a strict canonical-fixture profile, not a general offline model. Inputs that do not match a committed semantic fixture fail explicitly with `fixture_input_mismatch`.
 - `live_v1` and the live stages of `demo_hybrid_v1` require a server-side `OPENAI_API_KEY`. Browser code never receives provider credentials.
 
@@ -37,7 +37,7 @@ The generation domain persists idempotent, version-checked runs; immutable stage
 | `proofgraph/demo/` | Anonymous session authorization, canonical seed, reset, quotas, cleanup, and demo telemetry |
 | `proofgraph/evaluation/` | Internal structured generation, deterministic blinding, automated model judging, mean scoring, disagreement telemetry, and paired bootstrap analysis |
 | `proofgraph/generation/` | Run APIs, queue, context packing, providers, research, fixtures, SSE, patch review/application, and generation telemetry |
-| `proofgraph/runtime/` | Health check and generation-worker management commands |
+| `proofgraph/runtime/` | Health check, telemetry aggregation/audit drill, and generation-worker management commands |
 | `fixtures/security-questionnaires/v1/` | Immutable canonical replay assets and semantic-input commitments |
 | `evaluation/` | Versioned synthetic benchmark scenarios and the private-artifact workflow guide |
 | `demo-steps.md` | Phase 5 operator checklist for automated blind judging, offline analysis, and acceptance |
@@ -110,6 +110,46 @@ uv run python manage.py run_generation_worker --once
 ```
 
 `--once` processes at most one eligible run. Normal workers claim PostgreSQL rows with `FOR UPDATE SKIP LOCKED`, keep a 60-second fenced lease alive every 12 seconds on a dedicated database connection, physically delete expired research/source-content cache rows and bounded batches of expired demo sessions at startup and every 60 seconds, and recycle after 50 jobs or four hours.
+
+## Production observability and security verification
+
+Generation, demo, graph, provider, cache, source-ingestion, worker, and patch components emit one JSON object per telemetry record. Every record carries an intrinsic UTC timestamp and component name; applicable records carry correlated run, canvas, demo-session, patch, ingestion, graph-operation, worker, lease-epoch, attempt, operation-key, profile/version, duration, response, token, count, cache, and error fields. The emitter redacts credentials, authorization values, cookies, lease tokens, and sensitive URL query values before serialization.
+
+`observability_report` consumes a dedicated JSONL telemetry export and produces queue/depth, stage-duration/reuse, failure/retry/cancellation, lease/reclaim, provider latency/token/error, patch/conflict/regeneration, evidence quality, cache, source-ingestion, and demo-lifecycle views:
+
+```powershell
+uv run python manage.py observability_report `
+  --input .\telemetry.jsonl `
+  --output .\observability-report.json
+```
+
+The strict PG-028 drill expects the database referenced by the telemetry to remain available. It finds and correlates a successful run, retryable provider failure, lease loss, and patch conflict across logs, aggregate metrics, durable generation events, stage checkpoints, patch decisions, and graph-operation audits. Use `--include-audit-payloads` only in an access-controlled operator environment because it includes retained semantic contexts and derived excerpts:
+
+```powershell
+uv run python manage.py observability_report `
+  --input .\diagnostic-telemetry.jsonl `
+  --output .\diagnostic-report.json `
+  --require-drill `
+  --include-audit-payloads
+```
+
+The report fails the strict drill if a scenario cannot be correlated or if structured records omit required identifiers. Audit snapshots preserve frozen prompt, strategy, provider/model and fixture versions; packed context; bounded sources and claims; candidate and critique checkpoints; accepted/rejected patch operations; and direct user edits. Raw third-party source documents remain excluded by DQ-003.
+
+The security regression gate combines endpoint-wide anonymous authorization, CSRF and quota tests; URL/redirect/private-network and retention defenses; structured user-input isolation; prompt-injection and intellectual-property policy tests; server-only credential checks; inert command-like user text; and React text escaping:
+
+```powershell
+uv run pytest `
+  tests/test_demo_sessions.py `
+  tests/test_secure_sources.py `
+  tests/test_source_ingestion.py `
+  tests/test_structured_providers.py `
+  tests/test_generation_pipeline_schemas.py `
+  tests/test_security_hardening.py
+
+Set-Location web
+npm test -- --run src/App.test.tsx
+Set-Location ..
+```
 
 ## Phase 5 anonymous demo
 

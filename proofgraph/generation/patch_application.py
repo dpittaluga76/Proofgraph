@@ -1331,6 +1331,10 @@ def apply_graph_patch(patch_id: uuid.UUID, request: PatchApplyRequest) -> Servic
                             patch_id=patch.id,
                             run_id=patch.run_id,
                             canvas_id=patch.canvas_id,
+                            duration_ms=round(
+                                (time.perf_counter() - started) * 1_000,
+                                3,
+                            ),
                             **conflict,
                         )
                         raise _conflict(

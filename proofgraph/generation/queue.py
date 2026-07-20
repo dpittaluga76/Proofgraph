@@ -82,7 +82,17 @@ def terminalize_exhausted_runs() -> int:
                 terminal_once=True,
             )
             terminalized += 1
-            emit_telemetry("run.poisoned", run_id=run.id, attempt=run.attempt)
+            emit_telemetry(
+                "run.poisoned",
+                run_id=run.id,
+                canvas_id=run.canvas_id,
+                demo_session_id=run.demo_session_id,
+                operation_key=run.idempotency_key,
+                attempt=run.attempt,
+                max_attempts=run.max_attempts,
+                code="attempts_exhausted",
+                retryable=False,
+            )
             emit_patch_regeneration_terminal(
                 run_id=run.id,
                 canvas_id=run.canvas_id,
@@ -164,11 +174,30 @@ def finalize_expired_patch_ready_runs() -> int:
                 terminal_once=True,
             )
             completed += 1
+        run.refresh_from_db(fields=["completed_at", "started_at"])
         emit_telemetry(
             "run.patch_ready_recovered",
             run_id=run.id,
+            canvas_id=run.canvas_id,
             patch_id=patch_id,
+            worker_id=recovery_lease.worker_id,
             lease_epoch=recovery_lease.lease_epoch,
+            attempt=run.attempt,
+        )
+        emit_telemetry(
+            "run.completed",
+            run_id=run.id,
+            canvas_id=run.canvas_id,
+            patch_id=patch_id,
+            worker_id=recovery_lease.worker_id,
+            lease_epoch=recovery_lease.lease_epoch,
+            attempt=run.attempt,
+            recovered_after_lease_expiry=True,
+            duration_ms=(
+                int((run.completed_at - run.started_at).total_seconds() * 1_000)
+                if run.started_at is not None and run.completed_at is not None
+                else None
+            ),
         )
         emit_patch_regeneration_terminal(
             run_id=run.id,
@@ -242,6 +271,11 @@ def claim_run(worker_id: str) -> RunLease | None:
         attempt=run.attempt,
         lease_epoch=lease.lease_epoch,
         reclaimed=resume,
+    )
+    emit_telemetry(
+        "queue.depth",
+        depth=GenerationRun.objects.filter(status=RunStatus.QUEUED).count(),
+        worker_id=worker_id,
     )
     return lease
 

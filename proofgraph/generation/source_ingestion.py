@@ -123,6 +123,7 @@ def _reserve(
                     "source_ingestion.reservation",
                     ingestion_id=ingestion.id,
                     canvas_id=canvas_id,
+                    operation_key=envelope.operation_key,
                     outcome="conflict",
                 )
                 raise GraphAPIError(
@@ -135,6 +136,7 @@ def _reserve(
                     "source_ingestion.reservation",
                     ingestion_id=ingestion.id,
                     canvas_id=canvas_id,
+                    operation_key=envelope.operation_key,
                     outcome="completed_replay",
                 )
                 return SourceIngestionResult(serialize_ingestion(ingestion), 200)
@@ -143,6 +145,7 @@ def _reserve(
                     "source_ingestion.reservation",
                     ingestion_id=ingestion.id,
                     canvas_id=canvas_id,
+                    operation_key=envelope.operation_key,
                     outcome="failed_replay",
                 )
                 return SourceIngestionResult(serialize_ingestion(ingestion), 409)
@@ -151,6 +154,7 @@ def _reserve(
                     "source_ingestion.reservation",
                     ingestion_id=ingestion.id,
                     canvas_id=canvas_id,
+                    operation_key=envelope.operation_key,
                     outcome="inflight_reuse",
                     lease_epoch=ingestion.lease_epoch,
                 )
@@ -188,6 +192,7 @@ def _reserve(
         "source_ingestion.reservation",
         ingestion_id=ingestion.id,
         canvas_id=canvas_id,
+        operation_key=envelope.operation_key,
         outcome=outcome,
         lease_epoch=ingestion.lease_epoch,
     )
@@ -218,6 +223,7 @@ def _locked_fenced_ingestion(lease: SourceIngestionLease) -> SourceIngestionRequ
             "source_ingestion.fence_lost",
             ingestion_id=lease.ingestion_id,
             canvas_id=lease.canvas_id,
+            operation_key=lease.operation_key,
             lease_epoch=lease.lease_epoch,
         )
         raise GraphAPIError(
@@ -259,6 +265,7 @@ def _finalize_failure(lease: SourceIngestionLease, error: SourceRetrievalError) 
         "source_ingestion.failed",
         ingestion_id=lease.ingestion_id,
         canvas_id=lease.canvas_id,
+        operation_key=lease.operation_key,
         lease_epoch=lease.lease_epoch,
         code=error.code,
         retryable=error.retryable,
@@ -380,6 +387,7 @@ def _finalize_success(
         "source_ingestion.completed",
         ingestion_id=lease.ingestion_id,
         canvas_id=lease.canvas_id,
+        operation_key=lease.operation_key,
         source_id=source.id,
         lease_epoch=lease.lease_epoch,
     )
@@ -447,6 +455,7 @@ def create_source(
         "source_ingestion.retrieved",
         ingestion_id=reservation.ingestion_id,
         canvas_id=reservation.canvas_id,
+        operation_key=reservation.operation_key,
         source_kind=document.kind,
         cache_hit=document.cache_hit,
         latency_ms=int((time.monotonic() - started) * 1_000),
