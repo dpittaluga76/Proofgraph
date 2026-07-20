@@ -7,7 +7,7 @@
           "id": "strategy_productize_service",
           "template_id": "productize_recurring_service",
           "title": "Productize the recurring questionnaire workflow",
-          "approach": "Turn repeated answer gathering, review, and delivery into a bounded reviewer-controlled workflow.",
+          "approach": "Turn repeated answer gathering, review, and delivery into a reviewer-controlled workflow.",
           "rationale": "The team already performs recurring structured work that can be standardized without replacing expert review.",
           "required_signal_matches": ["customers already pay for the outcome", "the workflow repeats"],
           "failure_condition_risks": ["Most answers may require bespoke expert judgment"]

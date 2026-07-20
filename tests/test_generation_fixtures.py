@@ -136,7 +136,10 @@ def research_request(strategy: Node, key: str) -> GenerationRunRequest:
     )
 
 
-def canonical_synthesis_canvas() -> tuple[Canvas, Node, list[Node]]:
+def canonical_synthesis_canvas(
+    *,
+    applied_replay_shape: bool = False,
+) -> tuple[Canvas, Node, list[Node]]:
     canvas, strategy = canonical_research_canvas()
     source_benchmark = Node.objects.create(
         canvas=canvas,
@@ -170,6 +173,17 @@ def canonical_synthesis_canvas() -> tuple[Canvas, Node, list[Node]]:
             "authority": {"authoritative": False, "hierarchy_rank": 5},
         },
     )
+    if applied_replay_shape:
+        for source in (source_benchmark, source_interviews):
+            Edge.objects.create(
+                canvas=canvas,
+                source=strategy,
+                target=source,
+                kind=EdgeKind.DERIVED_FROM,
+                metadata={
+                    "fixture_role": f"strategy_{source.metadata['fixture_role']}",
+                },
+            )
     definitions = (
         (
             "claim_repeated_labor",
@@ -252,6 +266,14 @@ def canonical_synthesis_canvas() -> tuple[Canvas, Node, list[Node]]:
         }
         if contradiction_target is not None:
             metadata["contradiction_target_key"] = contradiction_target
+        if applied_replay_shape:
+            title = body
+            if role == "claim_workaround_pain":
+                body = (
+                    "Teams coordinate questionnaire work through fragile spreadsheet and "
+                    "document handoffs."
+                )
+                title = body
         claim = Node.objects.create(
             canvas=canvas,
             kind=NodeKind.CLAIM,
@@ -772,6 +794,73 @@ def test_full_replay_reaches_patch_ready_without_live_provider_access(monkeypatc
     assert run.stages.get(name="planning").openai_response_id.startswith("fixture:")
 
 
+def test_replay_generated_graph_can_drive_the_complete_canonical_journey(monkeypatch) -> None:
+    canvas, nodes = canonical_canvas()
+    # Demo reset records an audit revision before the first forward replay. The fixture
+    # must still match because entity versions and semantic graph state are unchanged.
+    canvas.revision = 1
+    canvas.save(update_fields=["revision"])
+    strategy_run = execute_replay(
+        monkeypatch,
+        canvas,
+        replay_request(nodes, "fixture-chained-strategies"),
+    )
+    assert strategy_run.status == RunStatus.COMPLETED, json.dumps(
+        strategy_run.error, sort_keys=True
+    )
+
+    client = Client()
+    strategy_apply = client.post(
+        f"/api/graph-patches/{strategy_run.patch.id}/apply",
+        data=json.dumps({}),
+        content_type="application/json",
+    )
+    assert strategy_apply.status_code == 200, strategy_apply.json()
+    strategy = Node.objects.get(
+        canvas=canvas,
+        kind=NodeKind.STRATEGY,
+        title="Productize the recurring questionnaire workflow",
+    )
+    assert "fixture_role" not in strategy.metadata
+
+    research_run = execute_replay(
+        monkeypatch,
+        canvas,
+        research_request(strategy, "fixture-chained-research"),
+    )
+    assert research_run.status == RunStatus.COMPLETED, json.dumps(
+        research_run.error, sort_keys=True
+    )
+    research_apply = client.post(
+        f"/api/graph-patches/{research_run.patch.id}/apply",
+        data=json.dumps({}),
+        content_type="application/json",
+    )
+    assert research_apply.status_code == 200, research_apply.json()
+    claims = list(
+        Node.objects.filter(
+            canvas=canvas,
+            kind=NodeKind.CLAIM,
+            metadata__review_status="accepted",
+        ).order_by("title")
+    )
+    assert len(claims) == 4
+
+    synthesis_run = execute_replay(
+        monkeypatch,
+        canvas,
+        synthesis_request(strategy, claims, "fixture-chained-synthesis"),
+    )
+    assert synthesis_run.status == RunStatus.COMPLETED, json.dumps(
+        synthesis_run.error, sort_keys=True
+    )
+    assert {
+        operation["node"]["title"]
+        for operation in synthesis_run.patch.operations
+        if operation["op"] == "ADD_NODE" and operation["node"]["kind"] == NodeKind.OPPORTUNITY
+    } >= {"Approved-answer questionnaire workspace"}
+
+
 def test_fixture_semantic_mismatch_fails_recoverably_without_fallback(monkeypatch) -> None:
     canvas, nodes = canonical_canvas()
     nodes[0].title = "A different semantic goal"
@@ -847,7 +936,7 @@ def test_replay_research_emits_provisional_evidence_and_reviewable_patch(monkeyp
 
 
 def test_replay_synthesis_produces_three_critiqued_traceable_opportunities(monkeypatch) -> None:
-    canvas, strategy, claims = canonical_synthesis_canvas()
+    canvas, strategy, claims = canonical_synthesis_canvas(applied_replay_shape=True)
     composition = build_production_composition(
         openai_client=BombClient(),
         live_product_selectable=False,

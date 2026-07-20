@@ -127,6 +127,46 @@ def fixture_semantic_hash(value: dict[str, Any]) -> str:
     return hashlib.sha256(canonical_json(value).encode()).hexdigest()
 
 
+_FIXTURE_RUNTIME_METADATA_KEYS = {
+    "approach",
+    "generated_by_run_id",
+    "provenance_node_ids",
+    "rationale",
+    "retrieved_at",
+    "sanitized_excerpt",
+    "source_kind",
+    "source_patch_id",
+    "url",
+}
+_FIXTURE_ROLE_BY_KIND_AND_TITLE = {
+    (
+        "claim",
+        "Answer gathering and approval handoffs can delay enterprise deals.",
+    ): "claim_deal_delay",
+    (
+        "claim",
+        "Security questionnaire response work repeats across enterprise sales cycles.",
+    ): "claim_repeated_labor",
+    (
+        "claim",
+        "Teams coordinate questionnaire work through fragile spreadsheet and document handoffs.",
+    ): "claim_workaround_pain",
+    (
+        "claim",
+        "Teams may reject automation that removes human security review.",
+    ): "claim_trust_burden",
+    (
+        "source",
+        "Synthetic security questionnaire workflow benchmark",
+    ): "source_benchmark",
+    ("source", "Synthetic buyer interview summary"): "source_interviews",
+    (
+        "strategy",
+        "Productize the recurring questionnaire workflow",
+    ): "strategy",
+}
+
+
 def _role_maps(stage_input: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
     snapshot = stage_input.get("context_snapshot") or {}
     node_roles: dict[str, str] = {}
@@ -135,21 +175,42 @@ def _role_maps(stage_input: dict[str, Any]) -> tuple[dict[str, str], dict[str, s
             continue
         metadata = node.get("metadata")
         role = metadata.get("fixture_role") if isinstance(metadata, dict) else None
-        node_roles[str(node["id"])] = str(role or node["id"])
+        inferred_role = _FIXTURE_ROLE_BY_KIND_AND_TITLE.get(
+            (str(node.get("kind")), str(node.get("title")))
+        )
+        node_roles[str(node["id"])] = str(role or inferred_role or node["id"])
     edge_roles: dict[str, str] = {}
     for edge in snapshot.get("edges") or []:
         if not isinstance(edge, dict) or not edge.get("id"):
             continue
         metadata = edge.get("metadata")
         role = metadata.get("fixture_role") if isinstance(metadata, dict) else None
-        edge_roles[str(edge["id"])] = str(role or edge["id"])
+        source_role = node_roles.get(str(edge.get("source_node_id")))
+        target_role = node_roles.get(str(edge.get("target_node_id")))
+        inferred_role = f"{source_role}_{target_role}" if source_role and target_role else None
+        edge_roles[str(edge["id"])] = str(role or inferred_role or edge["id"])
     return node_roles, edge_roles
 
 
 def _semantic_metadata(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
-    return {key: child for key, child in sorted(value.items()) if key != "fixture_role"}
+    generated_by_run_id = value.get("generated_by_run_id")
+    applied_fixture_patch = bool(value.get("source_patch_id")) or (
+        isinstance(generated_by_run_id, str) and generated_by_run_id != "fixture"
+    )
+    semantic = {
+        key: child
+        for key, child in sorted(value.items())
+        if key != "fixture_role"
+        and (not applied_fixture_patch or key not in _FIXTURE_RUNTIME_METADATA_KEYS)
+    }
+    authority = semantic.get("authority")
+    if applied_fixture_patch and isinstance(authority, dict):
+        semantic["authority"] = {
+            key: authority[key] for key in ("authoritative", "hierarchy_rank") if key in authority
+        }
+    return semantic
 
 
 def _normalize_fixture_ids(
@@ -180,6 +241,13 @@ def _fixture_prior_output(value: Any) -> Any:
 def fixture_semantic_input(stage_name: str, stage_input: dict[str, Any]) -> dict[str, Any]:
     snapshot = stage_input.get("context_snapshot") or {}
     manifest = stage_input.get("context_manifest") or {}
+    request = manifest.get("request") or {}
+    applied_fixture_patch = any(
+        isinstance(node, dict)
+        and isinstance(node.get("metadata"), dict)
+        and node["metadata"].get("source_patch_id")
+        for node in snapshot.get("nodes") or []
+    )
     node_roles, edge_roles = _role_maps(stage_input)
     nodes = []
     for node in snapshot.get("nodes") or []:
@@ -218,7 +286,6 @@ def fixture_semantic_input(stage_name: str, stage_input: dict[str, Any]) -> dict
                 "version": edge.get("version"),
             }
         )
-    request = manifest.get("request") or {}
     explicit_roles = sorted(
         node_roles.get(str(node_id), str(node_id))
         for node_id in manifest.get("explicit_node_ids") or []
@@ -251,7 +318,14 @@ def fixture_semantic_input(stage_name: str, stage_input: dict[str, Any]) -> dict
         "regeneration_phase": stage_input.get("regeneration_phase"),
         "instruction": request.get("instruction"),
         "regeneration_scope": request.get("regeneration_scope"),
-        "base_canvas_revision": stage_input.get("base_canvas_revision"),
+        # Forward replay stages are matched by semantic graph state. Demo reset and
+        # accepted patches legitimately advance this audit marker without changing that
+        # state. Existing regeneration recordings retain their frozen revision context.
+        "base_canvas_revision": (
+            0
+            if request.get("operation") != "regenerate_stale" or applied_fixture_patch
+            else stage_input.get("base_canvas_revision")
+        ),
         "explicit_roles": explicit_roles,
         "nodes": sorted(nodes, key=lambda value: value["role"]),
         "edges": sorted(edges, key=lambda value: value["role"]),
