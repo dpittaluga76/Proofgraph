@@ -1,16 +1,24 @@
-# Proofgraph V2 evaluation runbook
+# ProofGraph V2 evaluation runbook
 
-This runbook operates the fresh `comparative_acceptance_v2` benchmark through
-`scripts/run-evaluation-v2.ps1`. `design.md` sections 23.5–23.6 are authoritative, and PG-027 in
-`TASKS.md` remains Pending until a fresh post-registration V2 generation and judge run passes.
+This runbook operates the `comparative_acceptance_v2` benchmark through
+`scripts/run-evaluation-v2.ps1`. `design.md` sections 23.5–23.6 are authoritative. PG-027 completed
+after the fresh post-registration V2 generation and judge run passed.
 
 ## Current status
 
-As of July 16, 2026, the V2 acceptance rule, schema-v3 analysis, runner, and local tests are ready.
-The runner's dry-run path has been verified. No paid V2 generation or judge call has been made.
+As of July 20, 2026, the fresh V2 workflow is complete. It produced 80 Terra outputs with no
+partials, two 80-rating Sol/Luna judge artifacts, and a schema-v3
+`comparative_acceptance_v2` PASS. The frozen V1 result remains unchanged.
 
 The earlier V1-artifact V2 diagnostic remains implementation evidence only. This runbook creates a
 separate fresh run under `evaluation/runs/eval-terra-v2`; it never writes to `eval-terra-v1`.
+
+| Required dimension | Full-pipeline mean | Mean full − generic | 95% bootstrap CI | Result |
+| --- | ---: | ---: | --- | --- |
+| Evidence relevance | `5.000` | `+2.950` | `[2.675, 3.225]` | Pass |
+| Specificity | `5.000` | `+0.825` | `[0.675, 0.950]` | Pass |
+| Testability | `5.000` | `+1.450` | `[1.250, 1.650]` | Pass |
+| Builder fit | `5.000` | `+0.450` | `[0.250, 0.650]` | Pass |
 
 ## Frozen defaults
 
@@ -49,7 +57,7 @@ or provider call. Confirm that it shows:
 - `--acceptance-rule v2` on analysis.
 - `--confirm-cost` only on generation and judging.
 
-## 2. Run the fresh V2 workflow
+## 2. Run the fresh V2 workflow — completed
 
 The full workflow makes approximately 200 generation calls and 40 judge calls. Only run it after
 reviewing the dry-run output and intentionally accepting that cost boundary:
@@ -67,6 +75,9 @@ The script executes these stages in order:
 
 Paid commands still enforce their own `--confirm-cost` and credential checks. The script does not
 weaken those management-command boundaries.
+
+The official `eval-terra-v2` artifact is complete. Do not rerun it merely to reproduce the verdict;
+preserve it unchanged. Use a new run directory for any later protocol or model change.
 
 ## 3. Resume one stage
 
@@ -132,6 +143,8 @@ $Result.dimensions | ConvertTo-Json -Depth 8
 Expected protocol values are schema `3` and `comparative_acceptance_v2`. A `FAIL` verdict means the
 run completed successfully but one or more required quality rules did not pass. Preserve that run;
 do not change its scores, thresholds, or artifacts.
+
+The official run reports schema `3`, `comparative_acceptance_v2`, and `acceptance_passed: true`.
 
 ## V2 acceptance rules
 

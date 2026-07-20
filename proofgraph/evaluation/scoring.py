@@ -296,7 +296,7 @@ def render_markdown_report(report: dict[str, Any]) -> str:
     status = "PASS" if report["acceptance_passed"] else "FAIL"
     is_v2 = report.get("acceptance_rule_version") == ACCEPTANCE_RULE_IDS["v2"]
     lines = [
-        "# Proofgraph automated blinded model evaluation",
+        "# ProofGraph automated blinded model evaluation",
         "",
         f"Overall required-dimension result: **{status}**",
         "",

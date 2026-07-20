@@ -7,7 +7,7 @@ import "./styles.css";
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {
-  throw new Error("Proofgraph root element is missing.");
+  throw new Error("ProofGraph root element is missing.");
 }
 
 createRoot(rootElement).render(

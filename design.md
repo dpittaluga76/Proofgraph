@@ -1,4 +1,4 @@
-# Evidence-Native Opportunity Canvas
+# ProofGraph
 ## Product and System Design Document
 
 **Status:** Architecture frozen; implementation-ready draft  
@@ -6,14 +6,14 @@
 **Target:** OpenAI Build Week hackathon MVP  
 **Primary track:** Work & Productivity  
 **Primary user:** Technical founder or product builder  
-**Last updated:** July 15, 2026
+**Last updated:** July 20, 2026
 **Author:** Daniel Pittaluga
 
 ---
 
 ## 1. Executive Summary
 
-Evidence-Native Opportunity Canvas is a graph-native ideation system that helps technical founders turn vague goals, constraints, and public market signals into credible software business opportunities.
+ProofGraph is an evidence-native, graph-native ideation system that helps technical founders turn vague goals, constraints, and public market signals into credible software business opportunities.
 
 The system does not ask the model to invent startup ideas from a blank prompt. Instead, it:
 
@@ -1000,11 +1000,11 @@ Unique indexes already serving an exact access path need not be duplicated. Repr
 
 ### 12.15 Retained-source-content lifecycle
 
-Proofgraph retains derived evidence, not complete retrieved documents. Retrieved HTML, full page text, and complete user-supplied source documents are transient inputs and must never be written to graph nodes, run context, stage output, persisted event payloads, caches, or fixture recordings.
+ProofGraph retains derived evidence, not complete retrieved documents. Retrieved HTML, full page text, and complete user-supplied source documents are transient inputs and must never be written to graph nodes, run context, stage output, persisted event payloads, caches, or fixture recordings.
 
 Persisted source material is limited to citation metadata, normalized URLs, retrieval timestamps, content hashes, derived claims, and sanitized excerpts or provider snippets of at most 500 Unicode characters each. Accepted graph evidence and derived run, stage, event, patch, and audit records remain until their canvas is deleted. Future query-cache rows expire and are physically removed after 24 hours; `source_content_cache.retained_content` is always null, so a content cache row preserves identity and retrieval metadata but never a reusable document body.
 
-Fixture bundles may contain only synthetic or explicitly redistributable source material. They are immutable release assets rather than canvas-owned user data, so canvas deletion does not modify them; retiring a fixture deletes the complete versioned bundle. The product disclosure states that Proofgraph stores derived evidence and citations rather than copies of retrieved pages.
+Fixture bundles may contain only synthetic or explicitly redistributable source material. They are immutable release assets rather than canvas-owned user data, so canvas deletion does not modify them; retiring a fixture deletes the complete versioned bundle. The product disclosure states that ProofGraph stores derived evidence and citations rather than copies of retrieved pages.
 
 Canvas deletion is the authoritative user-data deletion boundary. It removes graph state, runs, stages, cursor/events, patches/decisions, source-ingestion reservations, and both cache key spaces in one lifecycle operation. Persistence entry points reject raw-content fields and overlong excerpts before writing, and tests seed sentinel source text to prove that it never reaches any durable payload.
 
@@ -1966,6 +1966,8 @@ The frozen V1 result remains an authoritative failure. An official V2 result req
 
 The checked-in V2 operator runner is a PowerShell orchestration layer over the four management commands; it does not duplicate generation, blinding, judging, or scoring logic. It defaults to a new ignored V2 run directory, supports dry-run and individual-stage execution, and writes a run manifest that freezes the scenario path, generation model, judge models, and three semantic seeds before any paid call. Resuming with different frozen settings or targeting the V1 run directory is rejected. Generation and judging remain separately protected by an explicit cost-confirmation switch, while preparation and analysis remain offline.
 
+The official post-registration V2 run completed on July 20, 2026. Terra produced eighty complete normalized outputs with no partials; Vera Crosscheck on Sol and Marco Launch on Luna each produced eighty ratings. The schema-v3 `comparative_acceptance_v2` report passed all required dimensions: evidence relevance improved `+2.950` with interval `[2.675, 3.225]`, specificity improved `+0.825` with interval `[0.675, 0.950]`, testability improved `+1.450` with interval `[1.250, 1.650]`, and builder fit reached a `5.000` full-pipeline mean with `+0.450` lift and interval `[0.250, 0.650]`. One of 560 score comparisons had an absolute disagreement of at least two points. The frozen V1 failure remains unchanged, all private V2 artifacts remain under the ignored evaluation-run directory, and PG-027 is complete.
+
 ---
 
 ## 24. Testing Strategy
@@ -2444,13 +2446,12 @@ The MVP is complete when a first-time user can:
 4. **DQ-004 — Always-parallel stale regeneration:** explicit stale-node and stale-branch regeneration always creates fresh successor production units and never replaces, updates, deletes, reanchors, or clears causes on the old stale branch. Each successor root carries canonical `regenerated_from_node_id`, `regeneration_scope`, and `lineage_mode: parallel` metadata and an audited old-to-new `evolves_into` edge. Applicable branch-scoped constraints are cloned and anchored to the successor while old anchors remain unchanged. The old branch supplies immediate undo/reference, accepted successors can be compared through lineage, and removing a successor remains an ordinary audited deletion workflow. Rejecting the patch changes no graph state; partial acceptance must preserve successor, lineage-edge, and cloned-constraint dependency closure. Destructive replacement is deferred beyond the MVP.
 5. **DQ-005 — Explicit graph neighborhoods for MVP context:** Phase 3 uses only the operation-specific graph neighborhood and dependency directions from sections 9.2.1 and 13. Traversal is cycle-safe breadth-first search with deterministic tier ranking, semantic-recency ordering, and stable-ID tie-breaking; it performs no embedding call and incurs no semantic-search storage or provider cost. If an optional graph tier is empty or disconnected, it remains empty rather than falling back to fuzzy similarity. Semantic similarity is deferred until evaluation demonstrates that explicit neighborhoods miss material context. Tests cover directionality, cycles, disconnected branches, stable truncation, layout independence, and the hard serialized-input cap.
 6. **DQ-006 — Internal-only evaluation harness:** the comparative benchmark is a command-line, Git-reviewable workflow for maintainers, two automated blinded model judges, and submission reviewers. It does not add product UI or expose raw variant/judge/provider data to anonymous visitors. Versioned synthetic scenarios, a private variant-keyed generation artifact, a separately randomized blind packet, a resumable private judge run, two model-provenanced rating artifacts, arithmetic-mean scoring with disagreement telemetry, and a deterministic bootstrap report implement section 23.6. Only summarized results may be copied into repository documentation.
-7. **DQ-008 — Canonical security-questionnaire opportunity:** the canonical scenario is a small B2B SaaS vendor trying to reduce the repeated work and enterprise-sales delay caused by security questionnaires. Inputs describe a small technical team, a six-week MVP horizon, public or user-approved evidence only, and no promise to replace legal or security review. Expected evidence covers repeated questionnaire labor, deal-cycle delay, spreadsheet/document workarounds, existing spend, identifiable security/sales-operations buyers, crowded incumbent tooling, trust and integration burden, and falsifying no-budget or low-recurrence signals. The expected opportunity is an evidence-backed questionnaire response workspace with reusable approved answers, provenance, reviewer workflow, and a cheap concierge validation experiment. The reset state contains the goal and builder constraints before generation; the immutable bundle ID is `security_questionnaires_v1`.
+7. **DQ-007 — Final product name:** the product and submission name is **ProofGraph**, using that exact capitalization in user-visible UI, documentation, demo/video copy, and submission materials. The public repository may use the conventional lowercase slug `proofgraph`. Existing technical identifiers—including the Python package, database defaults, cookies, local-storage keys, telemetry namespaces, and other compatibility-sensitive names—remain lowercase `proofgraph`; PG-030 applies and audits the user-visible name without an internal identifier migration. “Evidence-native opportunity canvas” remains the product descriptor rather than the product name.
+8. **DQ-008 — Canonical security-questionnaire opportunity:** the canonical scenario is a small B2B SaaS vendor trying to reduce the repeated work and enterprise-sales delay caused by security questionnaires. Inputs describe a small technical team, a six-week MVP horizon, public or user-approved evidence only, and no promise to replace legal or security review. Expected evidence covers repeated questionnaire labor, deal-cycle delay, spreadsheet/document workarounds, existing spend, identifiable security/sales-operations buyers, crowded incumbent tooling, trust and integration burden, and falsifying no-budget or low-recurrence signals. The expected opportunity is an evidence-backed questionnaire response workspace with reusable approved answers, provenance, reviewer workflow, and a cheap concierge validation experiment. The reset state contains the goal and builder constraints before generation; the immutable bundle ID is `security_questionnaires_v1`.
 
 ### 32.2 Open questions
 
-These do not block the architecture, but must be resolved before the dependent implementation task:
-
-7. **DQ-007:** What is the final product name?
+None.
 
 ---
 
@@ -2578,6 +2579,11 @@ These do not block the architecture, but must be resolved before the dependent i
 - V2 retains the `+0.5` positive-lift rule for evidence relevance, specificity, and testability, while builder fit uses a `4.5/5` full-pipeline floor plus a non-negative paired confidence-interval lower bound to correct the observed five-point-scale ceiling.
 - Official V2 acceptance requires fresh generation and judge artifacts created after pre-registration; local V1 reanalysis is diagnostic only.
 - The V2 PowerShell runner preserves management-command boundaries, freezes semantic run settings in an ignored manifest, supports dry-run and stage resume, and cannot bypass paid-call confirmation.
+
+### v11
+
+- The official fresh V2 comparative evaluation passed all four required dimensions and closes PG-027 while preserving the frozen V1 failure.
+- DQ-007 selects **ProofGraph** as the final product and submission name; user-visible branding uses that exact capitalization while compatibility-sensitive technical identifiers remain lowercase `proofgraph`.
 
 ---
 

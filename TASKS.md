@@ -4,75 +4,20 @@ This backlog is derived from `design.md`, which is the source of truth. Tasks ar
 
 ## Current Goal
 
-Continue **Phase 5: Demo hardening, evaluation, and delivery** with comparative evaluation.
+Continue **Phase 5: Demo hardening, evaluation, and delivery** with production observability and security hardening.
 
 Current phase entry criteria:
 
 - Phase 4 patch review, transactional application, dependency-aware invalidation, and always-parallel regeneration are complete.
 - The local PostgreSQL, backend, frontend, and browser verification gates pass.
 - PG-026 delivers the isolated, resettable, quota-protected anonymous demo locally.
+- PG-027 proves the comparative evaluation satisfies the pre-registered V2 acceptance rule.
 
-Current implementation task: **PG-027**. The frozen V1 generation, two-judge run, and failed result are complete. The pre-registered V2 acceptance rule, versioned offline analysis and reporting, focused tests, guarded runner, and operator runbook are implemented and verified locally. No fresh paid V2 run has been authorized or completed; PG-027 remains Pending until a distinct post-registration V2 generation and two-judge run passes.
+Current implementation task: **PG-028**. PG-027 is complete after the fresh post-registration V2 benchmark passed all four required dimensions. DQ-007 is also resolved: the final product and submission name is **ProofGraph**.
 
 ## Pending
 
-### Decision gates
-
-Decision tasks are listed before their dependents. Each completed decision must be recorded in `design.md` or a linked architecture decision and moved to **Done**.
-
-#### DQ-007 — Select the final product name
-
-**Depends on:** None
-
-**Outcome:** Select the submission and product name.
-
-**Done when:** Naming, repository/UI migration scope, and submission usage are recorded for PG-030.
-
-### Phase 1 — Graph foundation
-
 ### Phase 5 — Demo hardening, evaluation, and delivery
-
-#### PG-027 — Build the comparative evaluation harness
-
-**Depends on:** PG-019, PG-020, DQ-006
-
-**Outcome:** Measure whether orchestration materially beats generic brainstorming.
-
-**Progress (July 20, 2026):** The internal deterministic harness has 20 versioned synthetic
-scenarios, four frozen GPT-5.6-family structured-output paths, an explicit model allowlist, resumable
-six-worker generation, deterministic per-scenario blinding, and 10,000-resample paired bootstrap
-reporting. The Terra run completed all 200 provider stages and produced 80 normalized outputs; its
-blind packet and private variant map are prepared. The approved protocol now replaces manual human
-ratings and adjudication with Vera Crosscheck on Sol and Marco Launch on Luna, arithmetic-mean scores,
-and explicit disagreement telemetry. The judge runner, resumable private checkpoints, validated
-rating artifacts, schema-v2 arithmetic-mean analysis, disagreement reporting, tests, and operator
-documentation are implemented. The paid run completed all 40 judge calls and materialized 80 ratings
-per judge. The frozen v1 report passed evidence relevance (`+2.925`), specificity (`+0.950`), and
-testability (`+1.650`), but failed builder fit: its `+0.350` mean lift had a positive `[0.175, 0.550]`
-95% interval but missed the required `+0.500` mean. Both judges gave the full pipeline the maximum
-builder-fit score while the generic baseline was already near the ceiling. The result remains an
-authoritative FAIL. The V2 correction is now pre-registered in `design.md`: evidence relevance,
-specificity, and testability retain the `+0.500` positive-lift rule, while builder fit requires a
-full-pipeline mean of at least `4.500` and a non-negative paired-bootstrap confidence-interval lower
-bound. V1 remains the backward-compatible default and V2 requires explicit offline selection and a
-schema-v3 report. The local implementation and all 17 evaluation tests pass without provider calls;
-the V1-artifact V2 diagnostic also produces the expected schema-v3 PASS, including builder-fit mean
-`5.000`, lift `+0.350`, and interval `[0.175, 0.550]`. That reanalysis is diagnostic only. Any fresh
-generation or judge run requires separate authorization. Local work now includes the guarded,
-resumable `scripts/run-evaluation-v2.ps1` runner and dedicated `demo-steps-v2.md` operator guide. Its
-syntax, no-write dry run, paid-stage guard, V1-directory protection, and manifestless-artifact
-rejection pass without executing paid stages. PG-027 remains Pending. Operational state is tracked
-in `demo-steps.md`.
-
-**Done when:**
-
-- The harness contains at least twenty builder scenarios and compares generic, strategy-only, strategy-plus-evidence, and full-pipeline variants.
-- Variant labels/order are randomized; Vera Crosscheck and Marco Launch independently score every opaque output on the fixed five-point rubric for specificity, evidence relevance, novelty, feasibility, economic leverage, testability, and builder fit.
-- Effective scores are the arithmetic mean of both model judges; absolute two-point disagreements, both original scores, and both rationales are retained and reported without adjudication.
-- Results report each dimension separately with reproducible model/prompt/strategy versions.
-- Under explicit `comparative_acceptance_v2`, evidence relevance, specificity, and testability each show at least `+0.5` mean points over generic with a 95% paired-bootstrap confidence-interval lower bound above zero; builder fit has a full-pipeline mean of at least `4.5` and a paired full-minus-generic confidence-interval lower bound of at least zero.
-- The authoritative V1 failure remains unchanged, and the passing V2 result uses fresh post-registration generation and judge artifacts rather than reclassifying V1.
-- Evaluation placement decision **DQ-006** determines whether the harness remains internal or ships in the UI.
 
 #### PG-028 — Aggregate production observability and verify security hardening
 
@@ -134,6 +79,49 @@ in `demo-steps.md`.
 - Final submission artifacts and links, including the primary implementation Project task's `/feedback` Session ID, are checked against the official rules.
 
 ## Done
+
+### DQ-007 — Select the final product name
+
+**Completed:** July 20, 2026
+
+**Depends on:** None
+
+**Outcome:** Selected **ProofGraph** as the final product and submission name.
+
+**Done when:** Naming, repository/UI migration scope, and submission usage are recorded for PG-030.
+
+**Resolution:** `design.md` section 32.1 records the exact public capitalization and migration scope. Product UI, documentation, demo/video copy, and submission materials use **ProofGraph**. The public repository may use the lowercase `proofgraph` slug, and compatibility-sensitive technical identifiers remain lowercase `proofgraph`; PG-030 applies and audits the user-visible branding without an internal package, database, cookie, local-storage, or telemetry migration.
+
+### PG-027 — Build the comparative evaluation harness
+
+**Completed:** July 20, 2026
+
+**Depends on:** PG-019, PG-020, DQ-006
+
+**Outcome:** Measured whether orchestration materially beats generic brainstorming and obtained a passing fresh post-registration V2 result.
+
+**Completion:** The internal deterministic harness contains 20 versioned synthetic scenarios, four frozen GPT-5.6-family structured-output paths, an explicit model allowlist, resumable six-worker generation, deterministic per-scenario blinding, two independent automated model judges, arithmetic-mean scoring, disagreement telemetry, and 10,000-resample paired bootstrap reporting. The frozen V1 result remains an authoritative failure because builder-fit lift was `+0.350`, below its `+0.500` relative threshold. The pre-registered V2 correction retained the relative gates for evidence relevance, specificity, and testability while changing builder fit to an absolute `4.500` full-pipeline floor plus a non-negative paired confidence-interval lower bound.
+
+The official fresh V2 run used Terra generation with seed `28001`, packet seed `28002`, Vera Crosscheck on Sol and Marco Launch on Luna with judge seed `28003`, and the distinct ignored `eval-terra-v2` directory. It completed 80 normalized outputs with no partials and materialized 80 ratings per judge. The schema-v3 `comparative_acceptance_v2` result passed every required dimension:
+
+| Required dimension | Full-pipeline mean | Mean full − generic | 95% bootstrap CI | Result |
+| --- | ---: | ---: | --- | --- |
+| Evidence relevance | `5.000` | `+2.950` | `[2.675, 3.225]` | Pass |
+| Specificity | `5.000` | `+0.825` | `[0.675, 0.950]` | Pass |
+| Testability | `5.000` | `+1.450` | `[1.250, 1.650]` | Pass |
+| Builder fit | `5.000` | `+0.450` | `[0.250, 0.650]` | Pass |
+
+**Done when:**
+
+- The harness contains at least twenty builder scenarios and compares generic, strategy-only, strategy-plus-evidence, and full-pipeline variants.
+- Variant labels/order are randomized; Vera Crosscheck and Marco Launch independently score every opaque output on the fixed five-point rubric for specificity, evidence relevance, novelty, feasibility, economic leverage, testability, and builder fit.
+- Effective scores are the arithmetic mean of both model judges; absolute two-point disagreements, both original scores, and both rationales are retained and reported without adjudication.
+- Results report each dimension separately with reproducible model/prompt/strategy versions.
+- Under explicit `comparative_acceptance_v2`, evidence relevance, specificity, and testability each show at least `+0.5` mean points over generic with a 95% paired-bootstrap confidence-interval lower bound above zero; builder fit has a full-pipeline mean of at least `4.5` and a paired full-minus-generic confidence-interval lower bound of at least zero.
+- The authoritative V1 failure remains unchanged, and the passing V2 result uses fresh post-registration generation and judge artifacts rather than reclassifying V1.
+- Evaluation placement decision **DQ-006** determines whether the harness remains internal or ships in the UI.
+
+**Verification:** The V2 result reports schema `3`, `comparative_acceptance_v2`, and overall PASS. All required artifacts exist after the pre-registration commit; generation has 80 outputs and zero partials; each judge artifact has 80 ratings; all four required dimensions pass; and only one of 560 score comparisons differs by at least two points. The complete evaluation artifacts remain private under ignored `evaluation/runs/`, while only this aggregate summary is checked in. All 17 focused evaluation tests, Ruff checks, PowerShell parsing, runner dry-run, V1-directory protection, and manifestless-artifact rejection pass without additional provider calls.
 
 ### DQ-006 — Keep the evaluation harness internal
 

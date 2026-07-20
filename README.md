@@ -1,8 +1,8 @@
-# Proofgraph
+# ProofGraph
 
 An evidence-native canvas for discovering defensible software opportunities.
 
-**Phase 5 is in progress: PG-026's isolated judge-facing demo is complete, and PG-027 produced an honest failing v1 result.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark freezes 20 synthetic scenarios, four generation variants, resumable concurrent generation, deterministic blinding, two automated model-judge personas, arithmetic-mean scoring, disagreement telemetry, and paired bootstrap reporting. Terra generation, all 40 Sol/Luna judge calls, and offline analysis are complete. Evidence relevance, specificity, and testability passed; builder-fit lift was `+0.350`, below the frozen `+0.500` mean threshold despite a positive confidence interval and maximum full-pipeline scores. The pre-registered V2 acceptance rule, schema-v3 analysis, guarded runner, and runbook are implemented and verified locally without provider calls. PG-027 remains Pending because a separately authorized fresh post-registration V2 generation and two-judge run has not yet passed. Observability aggregation, deployment, and submission work also remain. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
+**Phase 5 is in progress: PG-026's isolated judge-facing demo and PG-027's comparative evaluation are complete.** Each anonymous visitor receives a private canonical seed, signed session, one-click reset, server-enforced profile allowlist, and PostgreSQL-backed cost controls. The internal benchmark freezes 20 synthetic scenarios, four generation variants, resumable concurrent generation, deterministic blinding, two automated model-judge personas, arithmetic-mean scoring, disagreement telemetry, and paired bootstrap reporting. The frozen V1 failure remains unchanged. A fresh post-registration V2 run completed 80 Terra outputs and two 80-rating Sol/Luna judge artifacts, then passed all four required schema-v3 acceptance gates. PG-028 production observability and security hardening is now the active task; deployment and submission work follow. The implementation follows [`design.md`](design.md): a Django ASGI web process, a separate Django management-command worker, PostgreSQL as the only stateful service, and an isolated React/Vite browser client.
 
 The PostgreSQL schema persists canvases, typed nodes and edges, append-only graph operations, and operation-linked staleness causes. Localized canvas operations provide optimistic semantic, position, and edge versions; idempotent retries; audited constraint anchoring; explicit dependency conflicts; and incremental revision replay. Database constraints and triggers enforce the frozen graph taxonomy, same-canvas references, branch-scoped constraint anchors, actor-scoped idempotency keys, and exact stale/cause consistency.
 
@@ -18,14 +18,14 @@ The generation domain persists idempotent, version-checked runs; immutable stage
 | Phase 2 — Durable jobs | Complete | PostgreSQL queue, fenced worker leases, immutable checkpoints, retry/cancellation, candidate patches, and replayable canvas SSE |
 | Phase 3 — Intelligence pipeline | Complete | Explicit-neighborhood context, structured generation stages, bounded research, evidence clustering, production profiles, and immutable fixtures |
 | Phase 4 — Patch review | Complete and locally verified through PG-025 | Dependency-closed review, transactional apply, evidence rejection, durable staleness, explicit always-parallel regeneration, progress UX, and retained-branch comparison |
-| Phase 5 — Demo hardening and delivery | In progress; PG-026 complete, PG-027 awaits a fresh V2 run | Seeded anonymous demo delivered; frozen V1 failure preserved; V2 rule, schema-v3 analysis, runner, and runbook complete locally; a fresh passing V2 result through final submission remains |
+| Phase 5 — Demo hardening and delivery | In progress; PG-026 and PG-027 complete, PG-028 active | Seeded anonymous demo delivered; frozen V1 failure preserved; official fresh V2 benchmark passed; observability, deployment, compliance, and final acceptance remain |
 
-`TASKS.md` is the implementation queue. **DQ-006 is resolved**: the benchmark remains an internal command-line workflow with no product-UI scope. **PG-027 is active** because the completed frozen V1 result failed the builder-fit mean-lift threshold. That result is preserved unchanged, and the V2 correction is now specified and implemented. The remaining PG-027 gate is a separately authorized fresh post-registration V2 run that passes the pre-registered rule. “Complete” above means implemented and verified in the local PostgreSQL-backed repository; it does not mean publicly deployed.
+`TASKS.md` is the implementation queue. **DQ-006 is resolved**: the benchmark remains an internal command-line workflow with no product-UI scope. **DQ-007 is resolved**: the final product and submission name is **ProofGraph**, while compatibility-sensitive technical identifiers remain lowercase `proofgraph`. **PG-027 is complete** after the fresh V2 benchmark passed its pre-registered schema-v3 rule. “Complete” above means implemented and verified in the local PostgreSQL-backed repository; it does not mean publicly deployed.
 
 ### Current boundaries
 
 - The isolated anonymous demo is implemented and verified locally, but no public environment has been deployed yet.
-- The comparative evaluation harness, Terra generation, 40-call automated judging, and offline report are complete. The V1 result failed only builder-fit relative lift and remains unchanged. V2 analysis and orchestration are complete locally, but a fresh paid V2 run has not been authorized or completed. Production observability aggregation, public deployment, hackathon packaging, and final demo acceptance remain tracked by PG-028 through PG-031.
+- The comparative evaluation harness is complete. The V1 result failed only builder-fit relative lift and remains unchanged; the distinct fresh V2 run passed all required dimensions. Private generation, mapping, judge, and detailed result artifacts remain ignored under `evaluation/runs/`; only aggregate results are published. Production observability aggregation, public deployment, hackathon packaging, and final demo acceptance remain tracked by PG-028 through PG-031.
 - `replay_v1` is a strict canonical-fixture profile, not a general offline model. Inputs that do not match a committed semantic fixture fail explicitly with `fixture_input_mismatch`.
 - `live_v1` and the live stages of `demo_hybrid_v1` require a server-side `OPENAI_API_KEY`. Browser code never receives provider credentials.
 
@@ -131,7 +131,7 @@ Expired-session cleanup claims at most 100 sessions per pass with `FOR UPDATE SK
 
 ## Phase 5 comparative evaluation
 
-PG-027 remains an internal benchmark; it adds no application route or browser control. The checked-in
+PG-027 is a completed internal benchmark; it adds no application route or browser control. The checked-in
 `evaluation/scenarios.v1.json` contains 20 synthetic builder scenarios with explicit constraints,
 advantages, preferences, and evidence limitations. The operator must select one of
 `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`; all four variants use that same selected model,
@@ -177,18 +177,27 @@ leaving insufficient headroom for the frozen `+0.500` relative-lift rule. Only 2
 comparisons had disagreements of at least two points, and neither concerned builder fit. The report
 therefore remains an authoritative FAIL rather than being adjusted after observation.
 
-The pre-registered V2 acceptance rule is implemented locally. Evidence relevance, specificity, and
-testability retain the V1 `+0.500` mean-lift and positive confidence-interval requirements. Builder
-fit instead requires a full-pipeline mean of at least `4.500 / 5` and a non-negative paired
-confidence-interval lower bound. V1 remains the default and reproducible schema-v2 path; V2 requires
-explicit `--acceptance-rule v2` selection and emits schema v3. Reanalysis of V1 ratings under V2 is
-diagnostic only; the local schema-v3 diagnostic passes with a `5.000` builder-fit mean while leaving
-the frozen V1 verdict unchanged. No fresh paid V2 run has been authorized or presented as an official
-result.
+The pre-registered V2 rule retains the V1 `+0.500` mean-lift and positive confidence-interval
+requirements for evidence relevance, specificity, and testability. Builder fit instead requires a
+full-pipeline mean of at least `4.500 / 5` and a non-negative paired confidence-interval lower bound.
+The official fresh post-registration V2 result is schema 3, identifies
+`comparative_acceptance_v2`, and passes:
 
-The fresh local V2 workflow is automated by [`scripts/run-evaluation-v2.ps1`](scripts/run-evaluation-v2.ps1)
-and documented in [`demo-steps-v2.md`](demo-steps-v2.md). Its paid stages still require explicit
-cost confirmation, and its dry-run mode creates no artifacts or provider calls.
+| Required dimension | Full-pipeline mean | Mean full − generic | 95% bootstrap CI | Result |
+| --- | ---: | ---: | --- | --- |
+| Evidence relevance | `5.000` | `+2.950` | `[2.675, 3.225]` | Pass |
+| Specificity | `5.000` | `+0.825` | `[0.675, 0.950]` | Pass |
+| Testability | `5.000` | `+1.450` | `[1.250, 1.650]` | Pass |
+| Builder fit | `5.000` | `+0.450` | `[0.250, 0.650]` | Pass |
+
+Terra produced 80 complete outputs with no partials; Vera Crosscheck on Sol and Marco Launch on Luna
+each produced 80 ratings. Only one of 560 score comparisons differed by at least two points. The
+earlier V1-artifact V2 reanalysis remains diagnostic only and does not replace either official result.
+
+The completed V2 workflow is automated by [`scripts/run-evaluation-v2.ps1`](scripts/run-evaluation-v2.ps1)
+and documented in [`demo-steps-v2.md`](demo-steps-v2.md). Its paid stages require explicit cost
+confirmation, its dry-run mode creates no artifacts or provider calls, and the completed private run
+remains ignored under `evaluation/runs/eval-terra-v2/`.
 
 ## Current end-to-end workflow
 
@@ -276,7 +285,7 @@ Graph patch apply accepts optional `selected_operation_ids` and `apply_nonconfli
 
 ## Retained source content
 
-Proofgraph follows the DQ-003 derived-evidence-only policy. It never persists complete retrieved pages, HTML, or user-supplied source documents. Durable records may contain citation metadata, content hashes, derived claims, and sanitized excerpts of at most 500 Unicode characters. Accepted graph evidence and run/stage/event audit records remain until canvas deletion; deleting a canvas permanently cascades through its graph, runs, stages, events, patches, decisions, reservations, and caches. Future query caches have a 24-hour physical-expiry requirement, retrieved-content rows keep `retained_content` null, and test fixture bundles must be synthetic or explicitly redistributable.
+ProofGraph follows the DQ-003 derived-evidence-only policy. It never persists complete retrieved pages, HTML, or user-supplied source documents. Durable records may contain citation metadata, content hashes, derived claims, and sanitized excerpts of at most 500 Unicode characters. Accepted graph evidence and run/stage/event audit records remain until canvas deletion; deleting a canvas permanently cascades through its graph, runs, stages, events, patches, decisions, reservations, and caches. Future query caches have a 24-hour physical-expiry requirement, retrieved-content rows keep `retained_content` null, and test fixture bundles must be synthetic or explicitly redistributable.
 
 ## Checks
 
@@ -288,6 +297,11 @@ Latest verified Phase 5 repository gate, including the deterministic PG-027 harn
 - Frontend formatting, lint, application/e2e type checking, all **29 unit/component tests**, and the production build passed.
 - All **3 live PostgreSQL-backed Playwright journeys** passed: the anonymous demo seed/reset/retired-canvas path, durable Phase 4 invalidation, and the Phase 1 graph journey.
 - Representative plans use the partial demo active-run index and ordered session-expiry index without sequential scans.
+
+PG-027 closure was verified on July 20, 2026: all 17 focused evaluation tests passed; the official
+V2 artifacts contain 80 complete outputs, zero partials, and 80 ratings per judge; and the
+schema-v3 report passed all required dimensions. This closure verification made no additional
+provider calls.
 
 Backend formatting and static analysis:
 

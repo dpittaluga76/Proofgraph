@@ -1,4 +1,4 @@
-# Proofgraph Phase 5 execution steps
+# ProofGraph Phase 5 execution steps
 
 This file tracks the operational work required to complete Phase 5. `design.md` is the source of
 truth and `TASKS.md` is the task tracker. Never mark a task complete here unless its definition of
@@ -6,18 +6,16 @@ done is also satisfied in `TASKS.md`.
 
 ## PG-027 — Automated blinded model evaluation
 
-**Current status (July 15, 2026):** The Terra generation, 40-call automated judge run, and offline
-schema-v2 analysis are complete. Three required dimensions passed. Builder fit failed only the mean
-lift threshold: `+0.350` with a positive 95% interval `[0.175, 0.550]`, versus the required `+0.500`.
-Both judges scored the full pipeline `5.0` on builder fit, while the generic baseline was already
-`4.5` from Vera and `4.8` from Marco, creating a five-point-scale ceiling. The authoritative v1 result
-remains **FAIL** and PG-027 remains Pending; scores and thresholds must not be changed retroactively.
-The V2 acceptance correction is pre-registered and implemented locally. It keeps the V1 relative
-rule for evidence relevance, specificity, and testability, while builder fit requires a full-pipeline
-mean of at least `4.500` and a non-negative paired confidence-interval lower bound. No fresh paid V2
-run has been authorized.
+**Current status (July 20, 2026):** PG-027 is complete. The frozen schema-v2 V1 result remains an
+authoritative FAIL because builder-fit lift was `+0.350`, below its original `+0.500` threshold. The
+distinct fresh post-registration V2 workflow completed 80 Terra outputs and two 80-rating Sol/Luna
+judge artifacts. Its schema-v3 `comparative_acceptance_v2` report passed all four required
+dimensions. Only aggregate results are published; the complete V1 and V2 artifacts remain unchanged
+under ignored `evaluation/runs/`.
 
-**Frozen run:** `evaluation/runs/eval-terra-v1`
+**Frozen V1 run:** `evaluation/runs/eval-terra-v1`
+
+**Official V2 run:** `evaluation/runs/eval-terra-v2`
 
 **Automated judges:**
 
@@ -45,7 +43,7 @@ are reported, not adjudicated.
 - [x] Verify the local evaluation test suite without making provider calls.
 - [x] Reanalyze V1 artifacts under V2 as a local diagnostic only: schema-v3 PASS, not official V2.
 - [x] Add and dry-run the guarded fresh V2 script documented in `demo-steps-v2.md`.
-- [ ] Obtain a passing frozen result before moving PG-027 to Done.
+- [x] Obtain a passing fresh V2 result and move PG-027 to Done.
 
 ### Frozen v1 result
 
@@ -60,6 +58,20 @@ The two judges had only 2 disagreements of at least two points among 560 compari
 none were on builder fit. The failure is therefore not judge disagreement. It is a relative-lift
 ceiling: the full pipeline already received the maximum builder-fit score, but generic generation
 also fit builders well because every variant receives the same builder scenario.
+
+### Official V2 result
+
+| Required dimension | Full-pipeline mean | Mean full − generic | 95% bootstrap CI | Result |
+| --- | ---: | ---: | --- | --- |
+| Evidence relevance | `5.000` | `+2.950` | `[2.675, 3.225]` | Pass |
+| Specificity | `5.000` | `+0.825` | `[0.675, 0.950]` | Pass |
+| Testability | `5.000` | `+1.450` | `[1.250, 1.650]` | Pass |
+| Builder fit | `5.000` | `+0.450` | `[0.250, 0.650]` | Pass |
+
+The V2 generation artifact contains 80 complete outputs and zero partials. Vera Crosscheck on Sol
+and Marco Launch on Luna each produced 80 ratings. One of 560 score comparisons (`0.2%`) differed by
+at least two points; it was on evidence relevance and did not change the arithmetic-mean scoring or
+the verdict.
 
 ### 1. Set the frozen paths and models
 
@@ -236,15 +248,16 @@ directory, generation seed, judge seed, generation artifact, blind packet, and j
 The completed local diagnostic is stored in ignored files `diagnostic-v2.json` and
 `diagnostic-v2.md` under the frozen V1 run directory. It produced schema v3 and passed all V2 rules;
 builder fit had a `5.000` full-pipeline mean, `+0.350` lift, and `[0.175, 0.550]` interval. This is
-implementation evidence only and does not satisfy PG-027's fresh-run requirement.
+implementation evidence only and did not satisfy PG-027's fresh-run requirement; the later distinct
+`eval-terra-v2` run satisfied it.
 
 ### Cost boundary
 
-The completed generation was estimated at approximately `$4.04`. The planned Sol/Luna judge run was
-estimated at approximately `$2–$3.50`, keeping the projected combined usage below the stated `$11`
-budget. These are planning estimates only; actual token usage and [OpenAI API pricing](https://developers.openai.com/api/docs/pricing)
-are authoritative. The implementation, tests, and local V2 diagnostic make no paid judge calls. No
-fresh V2 provider run is authorized by this document.
+The V1 generation was estimated at approximately `$4.04`, and its Sol/Luna judging was estimated at
+approximately `$2–$3.50`. These remain planning estimates only; actual token usage and
+[OpenAI API pricing](https://developers.openai.com/api/docs/pricing) are authoritative. The
+separately authorized V2 provider workflow is complete. PG-027 closure checks and documentation
+updates make no additional provider calls.
 
 ## References
 

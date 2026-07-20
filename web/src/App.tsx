@@ -1252,7 +1252,7 @@ export function App() {
           </span>
           <div>
             <p className="eyebrow">Evidence-native opportunity canvas</p>
-            <strong>Proofgraph</strong>
+            <strong>ProofGraph</strong>
           </div>
         </div>
         <form
@@ -1618,7 +1618,7 @@ function Welcome({
 
       <section
         className="welcome-actions"
-        aria-label="Open a Proofgraph canvas"
+        aria-label="Open a ProofGraph canvas"
       >
         <div className="action-card action-card--primary">
           <p className="card-index">01</p>
